@@ -38,6 +38,7 @@ CircleState g_real_state;
 CircleState g_measured_state;
 CircleState g_reported_state;
 CircleState g_estimated_state;
+CircleState g_smoothed_state_temp;
 CircleState g_smoothed_state;
 std::atomic<bool> g_running(true);
 std::mutex g_state_mutex;
@@ -48,8 +49,8 @@ KalmanFilter filter;
 TestTrack test_track(0.6f, 0.0f, 0.0f, 100.0f, 80.0f);
 
 // PID Controllers for x and y axes with more responsive gains
-PIDController pid_x(5.0, 0.3, 0.5, 0.0);  // Increased Kp and Kd for faster response
-PIDController pid_y(5.0, 0.3, 0.5, 0.0);
+PIDController pid_x(15.0, 1.5, 0.75, 0.0);  // Increased Kp and Kd for faster response
+PIDController pid_y(15.0, 1.5, 0.75, 0.0);
 
 // Error tracking for moving average
 const size_t ERROR_HISTORY_SIZE = 100; // Track last 100 samples
@@ -97,21 +98,30 @@ void update_circle_position() {
         // The PID takes the estimated state as input and outputs control signal
         // Update PID setpoints to follow the estimated state
         Eigen::MatrixXd A(6, 6); // System dynamics matrix
-        // Discrete LTI projectile motion, measuring position only
-        float dt_ = float(delay_time.count()) / 1000.0; // Time step in seconds
+        // Constant acceleration model for car dynamics
+        // State: [x, y, vx, vy, ax, ay]
+        // x_new = x + vx*dt + 0.5*ax*dt²
+        // vx_new = vx + ax*dt
+        // ax_new = ax (with process noise)
+        float dt_ = float(delay_time.count() + 650.0) / 1000.0; // Time step in seconds
+        float dt2 = 0.5 * dt_ * dt_; // 0.5 * dt²
         A << 
-            1, 0, dt_, 0, 0, 0, 
-            0, 1, 0, dt_, 0, 0,
-            0, 0, 1, 0, dt_, 0,
-            0, 0, 0, 1, 0, dt_,
-            0, 0, 0, 0, 1, 0,
-            0, 0, 0, 0, 0, 1;
+            1, 0, dt_, 0, dt2, 0,     // x position
+            0, 1, 0, dt_, 0, dt2,     // y position
+            0, 0, 1, 0, dt_, 0,       // x velocity
+            0, 0, 0, 1, 0, dt_,       // y velocity
+            0, 0, 0, 0, 1, 0,         // x acceleration
+            0, 0, 0, 0, 0, 1;         // y acceleration
 
         Eigen::VectorXd future = filter.predict(A);
-        pid_x.setSetpoint(future(0));
-        pid_y.setSetpoint(future(1));
+        
+        float diff = 1.0/UPDATE_FREQ;
+        g_smoothed_state_temp.x = (1.0 - diff) * g_smoothed_state_temp.x + diff * future(0);
+        g_smoothed_state_temp.y = (1.0 - diff) * g_smoothed_state_temp.y + diff * future(1);
         
         // Calculate PID outputs based on current smoothed position
+        pid_x.setSetpoint(g_smoothed_state_temp.x);
+        pid_y.setSetpoint(g_smoothed_state_temp.y);
         double dt = 1.0 / UPDATE_FREQ;
         double control_x = pid_x.update(g_smoothed_state.x, dt);
         double control_y = pid_y.update(g_smoothed_state.y, dt);
@@ -119,8 +129,9 @@ void update_circle_position() {
         // Apply control outputs to smoothed state
         g_smoothed_state.x += control_x * dt;
         g_smoothed_state.y += control_y * dt;
-        // g_smoothed_state.x = future(0);
-        // g_smoothed_state.y = future(1);
+
+        // g_smoothed_state.x = g_smoothed_state_temp.x;
+        // g_smoothed_state.y = g_smoothed_state_temp.y;
 
         // Calculate and track error between real and measured/estimated/smoothed positions
         float error_measured = std::sqrt(
@@ -137,7 +148,6 @@ void update_circle_position() {
         );
         
         error_mutex.lock();
-        float diff = 1.0/float(ERROR_HISTORY_SIZE);
         error_measured_wt_ave = (1.0 - diff) * error_measured_wt_ave + diff * error_measured;
         error_estimated_wt_ave = (1.0 - diff) * error_estimated_wt_ave + diff * error_estimated;
         error_smoothed_wt_ave = (1.0 - diff) * error_smoothed_wt_ave + diff * error_smoothed;
@@ -227,6 +237,7 @@ int main() {
     int m = 2; // Number of measurements
 
     double dt = 1.0/UPDATE_FREQ; // Time step
+    double dt2 = 0.5 * dt * dt;  // 0.5 * dt²
 
     Eigen::MatrixXd A(n, n); // System dynamics matrix
     Eigen::MatrixXd C(m, n); // Output matrix
@@ -234,26 +245,32 @@ int main() {
     Eigen::MatrixXd R(m, m); // Measurement noise covariance
     Eigen::MatrixXd P(n, n); // Estimate error covariance
 
-    // Discrete LTI projectile motion, measuring position only
+    // Constant acceleration model for car dynamics
+    // State: [x, y, vx, vy, ax, ay]
+    // Position: x_new = x + vx*dt + 0.5*ax*dt²
+    // Velocity: vx_new = vx + ax*dt
+    // Acceleration: ax_new = ax (with process noise to model changing acceleration)
     A << 
-        1, 0, dt, 0, 0, 0, 
-        0, 1, 0, dt, 0, 0,
-        0, 0, 1, 0, dt, 0,
-        0, 0, 0, 1, 0, dt,
-        0, 0, 0, 0, 1, 0,
-        0, 0, 0, 0, 0, 1;
+        1, 0, dt, 0, dt2, 0,      // x position
+        0, 1, 0, dt, 0, dt2,      // y position
+        0, 0, 1, 0, dt, 0,        // x velocity
+        0, 0, 0, 1, 0, dt,        // y velocity
+        0, 0, 0, 0, 1, 0,         // x acceleration
+        0, 0, 0, 0, 0, 1;         // y acceleration
     C << 
         1, 0, 0, 0, 0, 0,
         0, 1, 0, 0, 0, 0;
     
     // Reasonable covariance matrices
+    // Process noise: allow for changes in acceleration (car can accelerate/brake/turn)
+    // Higher noise on acceleration states since car actively changes acceleration
     Q << 
-        .0, .0, .0, .0, .0, .0,
-        .0, .0, .0, .0, .0, .0,
-        .0, .0, .001, .0, .0, .0,
-        .0, .0, .0, .001, .0, .0,
-        .0, .0, .0, .0, .00001, .0,
-        .0, .0, .0, .0, .0, .00001;
+        .0, .0, .0, .0, .0, .0,           // x position (deterministic from velocity)
+        .0, .0, .0, .0, .0, .0,           // y position (deterministic from velocity)
+        .0, .0, .001, .0, .0, .0,         // x velocity (some uncertainty)
+        .0, .0, .0, .001, .0, .0,         // y velocity (some uncertainty)
+        .0, .0, .0, .0, .01, .0,          // x acceleration (higher - car can change accel)
+        .0, .0, .0, .0, .0, .01;          // y acceleration (higher - car can turn)
     R << std::pow(MEAS_NOISE_STDDEV, 2), 0, 
          0, std::pow(MEAS_NOISE_STDDEV, 2);
     P << 1.0, .0, 0, 0, 0, 0,
