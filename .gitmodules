@@ -1,0 +1,6 @@
+[submodule "eigen"]
+	path = eigen
+	url = https://github.com/PX4/eigen.git
+[submodule "kalman-cpp"]
+	path = kalman-cpp
+	url = https://github.com/cridgeon/kalman-cpp.git
