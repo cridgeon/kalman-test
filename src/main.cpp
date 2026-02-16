@@ -3,7 +3,8 @@
 #include <mutex>
 #include <atomic>
 #include <cmath>
-#include <deque>
+#include <queue>
+#include <chrono>
 
 #include "kalman.hpp"
 #include "imgui.h"
@@ -12,10 +13,16 @@
 #include <GLFW/glfw3.h>
 #include <random>
 #include "pid-controller/pid.hpp"
+#include "test_track.hpp"
+
+using namespace std::chrono;
+#define GET_SYS_MILLIS() duration_cast<milliseconds>(system_clock::now().time_since_epoch())
 
 static const int WINDOW_WIDTH = 1280;
 static const int WINDOW_HEIGHT = 720;
-static const float UPDATE_FREQ = 30.0f;
+static const float UPDATE_FREQ = 150.0f;
+static const float MEAS_NOISE_STDDEV = 0.05f;
+static const milliseconds delay_time(500);
 
 // Shared state for circle position
 struct CircleState {
@@ -29,12 +36,16 @@ struct CircleState {
 
 CircleState g_real_state;
 CircleState g_measured_state;
+CircleState g_reported_state;
 CircleState g_estimated_state;
 CircleState g_smoothed_state;
 std::atomic<bool> g_running(true);
 std::mutex g_state_mutex;
 
 KalmanFilter filter;
+
+// Test track for realistic car movement
+TestTrack test_track(0.6f, 0.0f, 0.0f, 100.0f, 80.0f);
 
 // PID Controllers for x and y axes with more responsive gains
 PIDController pid_x(5.0, 0.3, 0.5, 0.0);  // Increased Kp and Kd for faster response
@@ -47,18 +58,37 @@ float error_estimated_wt_ave = 0.0f;
 float error_smoothed_wt_ave = 0.0f;
 std::mutex error_mutex;
 
+
+std::queue<std::pair<milliseconds, std::pair<float, float>>> position_queue;
+
 // Thread function to update circle position
 void update_circle_position() {
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::normal_distribution<float> nd(0.0f, 0.1f);
+    std::normal_distribution<float> nd(0.0f, MEAS_NOISE_STDDEV);
 
     while (g_running) {
-
+        // Update real state from test track
+        TestTrack::Position track_pos = test_track.update(1.0f / UPDATE_FREQ);
+        
         g_state_mutex.lock();
+        g_real_state.x = track_pos.x;
+        g_real_state.y = track_pos.y;
+        g_real_state.velocity_x = track_pos.vx;
+        g_real_state.velocity_y = track_pos.vy;
+        
         g_measured_state.x = g_real_state.x + nd(gen);
         g_measured_state.y = g_real_state.y + nd(gen);
-        filter.update(Eigen::Vector2d(g_measured_state.x, g_measured_state.y));
+        position_queue.push({GET_SYS_MILLIS(), {g_measured_state.x, g_measured_state.y}});
+
+        milliseconds now = GET_SYS_MILLIS();
+        while(!position_queue.empty() && position_queue.front().first <= now - delay_time) {
+            g_reported_state.x = position_queue.front().second.first;
+            g_reported_state.y = position_queue.front().second.second;
+            position_queue.pop();
+        }
+
+        filter.update(Eigen::Vector2d(g_reported_state.x, g_reported_state.y));
         Eigen::VectorXd estimated = filter.state();
         g_estimated_state.x = estimated(0);
         g_estimated_state.y = estimated(1);
@@ -68,7 +98,7 @@ void update_circle_position() {
         // Update PID setpoints to follow the estimated state
         Eigen::MatrixXd A(6, 6); // System dynamics matrix
         // Discrete LTI projectile motion, measuring position only
-        float dt_ = 0.1;
+        float dt_ = float(delay_time.count()) / 1000.0; // Time step in seconds
         A << 
             1, 0, dt_, 0, 0, 0, 
             0, 1, 0, dt_, 0, 0,
@@ -89,6 +119,8 @@ void update_circle_position() {
         // Apply control outputs to smoothed state
         g_smoothed_state.x += control_x * dt;
         g_smoothed_state.y += control_y * dt;
+        // g_smoothed_state.x = future(0);
+        // g_smoothed_state.y = future(1);
 
         // Calculate and track error between real and measured/estimated/smoothed positions
         float error_measured = std::sqrt(
@@ -105,9 +137,10 @@ void update_circle_position() {
         );
         
         error_mutex.lock();
-        error_measured_wt_ave = 0.99f * error_measured_wt_ave + 0.01f * error_measured;
-        error_estimated_wt_ave = 0.99f * error_estimated_wt_ave + 0.01f * error_estimated;
-        error_smoothed_wt_ave = 0.99f * error_smoothed_wt_ave + 0.01f * error_smoothed;
+        float diff = 1.0/float(ERROR_HISTORY_SIZE);
+        error_measured_wt_ave = (1.0 - diff) * error_measured_wt_ave + diff * error_measured;
+        error_estimated_wt_ave = (1.0 - diff) * error_estimated_wt_ave + diff * error_estimated;
+        error_smoothed_wt_ave = (1.0 - diff) * error_smoothed_wt_ave + diff * error_smoothed;
         error_mutex.unlock();
 
         g_state_mutex.unlock(); 
@@ -133,7 +166,7 @@ void update_circle_position() {
         // }
         
         // Sleep to control update rate (~60 updates per second)
-        std::this_thread::sleep_for(std::chrono::microseconds(33333));
+        std::this_thread::sleep_for(std::chrono::microseconds(int(1000000 / UPDATE_FREQ)));
     }
 }
 
@@ -185,6 +218,7 @@ int main() {
     ImVec4 clear_color = ImVec4(0.1f, 0.1f, 0.15f, 1.00f);
     ImVec4 real_color = ImVec4(0.2f, 0.8f, 0.2f, 1.0f);
     ImVec4 measured_color = ImVec4(0.8f, 0.2f, 0.2f, 1.0f);
+    ImVec4 reported_color = ImVec4(0.8f, 0.8f, 0.2f, 1.0f);
     ImVec4 estimated_color = ImVec4(0.2f, 0.2f, 0.8f, 1.0f);
     ImVec4 smoothed_color = ImVec4(0.8f, 0.2f, 0.8f, 1.0f);
     
@@ -220,8 +254,8 @@ int main() {
         .0, .0, .0, .001, .0, .0,
         .0, .0, .0, .0, .00001, .0,
         .0, .0, .0, .0, .0, .00001;
-    R << std::pow(0.1, 2), 0, 
-         0, std::pow(0.1, 2);
+    R << std::pow(MEAS_NOISE_STDDEV, 2), 0, 
+         0, std::pow(MEAS_NOISE_STDDEV, 2);
     P << 1.0, .0, 0, 0, 0, 0,
          0, 1.0, 0, 0, 0, 0,
          0, 0, 1.0, 0, 0, 0,
@@ -245,16 +279,9 @@ int main() {
         // Poll and handle events
         glfwPollEvents();
 
-        // Get cursor position and update real circle position
-        double mouse_x, mouse_y;
-        glfwGetCursorPos(window, &mouse_x, &mouse_y);
+        // Real circle position is now updated by the test track in update_circle_position thread
+        // No longer using mouse position
         
-        // Convert screen coordinates to normalized coordinates (-1 to 1)
-        g_state_mutex.lock();
-        g_real_state.x = (mouse_x / WINDOW_WIDTH) * 2.0 - 1.0;
-        g_real_state.y = (mouse_y / WINDOW_HEIGHT) * 2.0 - 1.0;
-        g_state_mutex.unlock();
-
         // Start the Dear ImGui frame
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
@@ -296,6 +323,8 @@ int main() {
         draw_list->AddCircle(ImVec2((real_x + 1.0)/2.0 * WINDOW_WIDTH, (real_y + 1.0)/2.0 * WINDOW_HEIGHT), real_r, col, 32);
         col = ImGui::GetColorU32(measured_color);
         draw_list->AddCircle(ImVec2((measured_x + 1.0)/2.0 * WINDOW_WIDTH, (measured_y + 1.0)/2.0 * WINDOW_HEIGHT), measured_r, col, 32);
+        col = ImGui::GetColorU32(reported_color);
+        draw_list->AddCircle(ImVec2((g_reported_state.x + 1.0)/2.0 * WINDOW_WIDTH, (g_reported_state.y + 1.0)/2.0 * WINDOW_HEIGHT), g_reported_state.radius, col, 32);
         col = ImGui::GetColorU32(estimated_color);
         draw_list->AddCircle(ImVec2((estimated_x + 1.0)/2.0 * WINDOW_WIDTH, (estimated_y + 1.0)/2.0 * WINDOW_HEIGHT), estimated_r, col, 32);
         col = ImGui::GetColorU32(smoothed_color);
@@ -306,16 +335,49 @@ int main() {
         // Show controls window
         if (show_controls) {
             ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowSize(ImVec2(350, 0), ImGuiCond_FirstUseEver);
             ImGui::Begin("Controls", &show_controls);
             
             ImGui::Text("Multi-threaded Circle Animation");
             ImGui::Separator();
-            ImGui::Text("Position: (%.1f, %.1f)", measured_x, measured_y);
+            ImGui::Text("Test Track Mode (Figure-8 Loop)");
+            ImGui::Text("Position: (%.3f, %.3f)", real_x, real_y);
+            ImGui::Text("Velocity: (%.3f, %.3f)", g_real_state.velocity_x, g_real_state.velocity_y);
+            ImGui::Text("Speed: %.3f", test_track.getCurrentSpeed());
+            ImGui::Text("Track Time: %.2f / %.2f sec", test_track.getTime(), 30.0f);
             ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 
                        1000.0f / io.Framerate, io.Framerate);
             
             ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Text("Track Speed Settings");
+            
+            static float max_speed = 100.0f;
+            static float min_speed = 80.0f;
+            
+            if (ImGui::SliderFloat("Max Speed", &max_speed, 0.5f, 100.0f, "%.2f")) {
+                // Ensure max speed is always greater than min speed
+                if (max_speed <= min_speed) {
+                    max_speed = min_speed + 0.1f;
+                }
+                test_track.setSpeedLimits(max_speed, min_speed);
+            }
+            
+            if (ImGui::SliderFloat("Min Speed", &min_speed, 0.1f, 100.0f, "%.2f")) {
+                // Ensure min speed is always less than max speed
+                if (min_speed >= max_speed) {
+                    min_speed = max_speed - 0.1f;
+                }
+                test_track.setSpeedLimits(max_speed, min_speed);
+            }
+            
+            ImGui::Spacing();
+            ImGui::Separator();
             ImGui::Checkbox("Show ImGui Demo", &show_demo_window);
+            
+            if (ImGui::Button("Reset Track")) {
+                test_track.reset();
+            }
             
             ImGui::End();
         }
