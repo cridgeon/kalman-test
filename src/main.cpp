@@ -1,3 +1,14 @@
+/*
+ * Frame Capture Usage:
+ * - The global vector 'frame_data' contains raw RGBA pixel data
+ * - Each pixel uses 4 bytes: Red, Green, Blue, Alpha (0-255 each)
+ * - Image dimensions are available via glfwGetFramebufferSize()
+ * - Pixel at (x,y) is at index: ((height-y-1)*width + x)*4 (note vertical flip)
+ * - Use 'Capture Frame' button for single capture or enable 'Continuous Capture'
+ * - Access frame_data through the frame_mutex for thread safety
+ * - See processFrameData() function for example of pixel access
+ */
+
 #include <iostream>
 #include <thread>
 #include <mutex>
@@ -5,12 +16,15 @@
 #include <cmath>
 #include <queue>
 #include <chrono>
+#include <vector>
+#include <fstream>
 
 #include "kalman.hpp"
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 #include <GLFW/glfw3.h>
+#include <GL/gl.h>
 #include <random>
 #include "pid-controller/pid.hpp"
 #include "test_track.hpp"
@@ -20,9 +34,10 @@ using namespace std::chrono;
 
 static const int WINDOW_WIDTH = 1280;
 static const int WINDOW_HEIGHT = 720;
-static const float UPDATE_FREQ = 150.0f;
-static const float MEAS_NOISE_STDDEV = 0.05f;
-static const milliseconds delay_time(500);
+static const float UPDATE_FREQ = 15.0f;
+static const float MEAS_NOISE_STDDEV = 0.f;
+static const milliseconds delay_time(0);
+static const float smothmult = 2.0;
 
 // Shared state for circle position
 struct CircleState {
@@ -43,14 +58,20 @@ CircleState g_smoothed_state;
 std::atomic<bool> g_running(true);
 std::mutex g_state_mutex;
 
+// Frame capture variables
+std::vector<unsigned char> frame_data;
+bool capture_frame = false;
+bool continuous_capture = false;
+std::mutex frame_mutex;
+
 KalmanFilter filter;
 
 // Test track for realistic car movement
 TestTrack test_track(0.6f, 0.0f, 0.0f, 100.0f, 80.0f);
 
 // PID Controllers for x and y axes with more responsive gains
-PIDController pid_x(15.0, 1.5, 0.75, 0.0);  // Increased Kp and Kd for faster response
-PIDController pid_y(15.0, 1.5, 0.75, 0.0);
+PIDController pid_x(8.0, 1.5, 0.6, 0.0);  // Increased Kp and Kd for faster response
+PIDController pid_y(8.0, 1.5, 0.6, 0.0);
 
 // Error tracking for moving average
 const size_t ERROR_HISTORY_SIZE = 100; // Track last 100 samples
@@ -58,7 +79,8 @@ float error_measured_wt_ave = 0.0f;
 float error_estimated_wt_ave = 0.0f;
 float error_smoothed_wt_ave = 0.0f;
 std::mutex error_mutex;
-
+//-137.39382091205363
+//-137.3961158968665
 
 std::queue<std::pair<milliseconds, std::pair<float, float>>> position_queue;
 
@@ -103,7 +125,7 @@ void update_circle_position() {
         // x_new = x + vx*dt + 0.5*ax*dt²
         // vx_new = vx + ax*dt
         // ax_new = ax (with process noise)
-        float dt_ = float(delay_time.count() + 650.0) / 1000.0; // Time step in seconds
+        float dt_ = float(delay_time.count() + (500.0 * smothmult)) / 1000.0; // Time step in seconds
         float dt2 = 0.5 * dt_ * dt_; // 0.5 * dt²
         A << 
             1, 0, dt_, 0, dt2, 0,     // x position
@@ -115,7 +137,7 @@ void update_circle_position() {
 
         Eigen::VectorXd future = filter.predict(A);
         
-        float diff = 1.0/UPDATE_FREQ;
+        float diff = 1.0/(UPDATE_FREQ * smothmult);
         g_smoothed_state_temp.x = (1.0 - diff) * g_smoothed_state_temp.x + diff * future(0);
         g_smoothed_state_temp.y = (1.0 - diff) * g_smoothed_state_temp.y + diff * future(1);
         
@@ -130,8 +152,8 @@ void update_circle_position() {
         g_smoothed_state.x += control_x * dt;
         g_smoothed_state.y += control_y * dt;
 
-        // g_smoothed_state.x = g_smoothed_state_temp.x;
-        // g_smoothed_state.y = g_smoothed_state_temp.y;
+        g_smoothed_state.x = g_smoothed_state_temp.x;
+        g_smoothed_state.y = g_smoothed_state_temp.y;
 
         // Calculate and track error between real and measured/estimated/smoothed positions
         float error_measured = std::sqrt(
@@ -155,33 +177,78 @@ void update_circle_position() {
 
         g_state_mutex.unlock(); 
         
-        // Update position
-        // g_real_state.x += g_real_state.velocity_x;
-        // g_real_state.y += g_real_state.velocity_y;
-
-        
-        // Bounce off walls
-        // if (g_real_state.x - g_real_state.radius < 0 || 
-        //     g_real_state.x + g_real_state.radius > WINDOW_WIDTH) {
-        //     g_real_state.velocity_x = -g_real_state.velocity_x;
-        //     g_real_state.x = std::max(g_real_state.radius, 
-        //                                std::min(g_real_state.x, WINDOW_WIDTH - g_real_state.radius));
-        // }
-        
-        // if (g_real_state.y - g_real_state.radius < 0 || 
-        //     g_real_state.y + g_real_state.radius > WINDOW_HEIGHT) {
-        //     g_real_state.velocity_y = -g_real_state.velocity_y;
-        //     g_real_state.y = std::max(g_real_state.radius, 
-        //                                std::min(g_real_state.y, WINDOW_HEIGHT - g_real_state.radius));
-        // }
-        
-        // Sleep to control update rate (~60 updates per second)
         std::this_thread::sleep_for(std::chrono::microseconds(int(1000000 / UPDATE_FREQ)));
     }
 }
 
 static void glfw_error_callback(int error, const char* description) {
     std::cerr << "GLFW Error " << error << ": " << description << std::endl;
+}
+
+// Function to capture frame data from the OpenGL framebuffer
+void captureFrameData(int width, int height) {
+    // Ensure frame_data vector is properly sized for RGBA format (4 bytes per pixel)
+    frame_data.resize(width * height * 4);
+    
+    // Read pixels from the framebuffer
+    // Note: glReadPixels reads from bottom-left, so the image will be vertically flipped
+    glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, frame_data.data());
+    
+    // Optional: Check for OpenGL errors
+    GLenum error = glGetError();
+    if (error != GL_NO_ERROR) {
+        std::cerr << "OpenGL error during frame capture: " << error << std::endl;
+    }
+}
+
+// Example function demonstrating how to access individual pixels from the frame data
+float processFrameData(int width, int height) {
+    if (frame_data.size() < width * height * 4) {
+        std::cerr << "Frame data not available or incomplete" << std::endl;
+        return -1.0f;
+    }
+    
+    // Example: Calculate average brightness of the frame
+    unsigned long total_brightness = 0;
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            // Note: y is flipped because OpenGL reads from bottom-left
+            int pixel_index = ((height - y - 1) * width + x) * 4;
+            unsigned char r = frame_data[pixel_index];
+            unsigned char g = frame_data[pixel_index + 1];
+            unsigned char b = frame_data[pixel_index + 2];
+            // Alpha channel is at frame_data[pixel_index + 3]
+            
+            // Calculate brightness using luminance formula
+            total_brightness += (unsigned long)(0.299 * r + 0.587 * g + 0.114 * b);
+        }
+    }
+    
+    return (float)total_brightness / (width * height);
+}
+
+// Function to save frame data to a raw binary file
+void saveFrameToFile(const std::string& filename, int width, int height) {
+    if (frame_data.size() < width * height * 4) {
+        std::cerr << "No frame data available to save" << std::endl;
+        return;
+    }
+    
+    std::ofstream file(filename, std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "Failed to open file for writing: " << filename << std::endl;
+        return;
+    }
+    
+    // Write dimensions first (for easier reading later)
+    file.write(reinterpret_cast<const char*>(&width), sizeof(width));
+    file.write(reinterpret_cast<const char*>(&height), sizeof(height));
+    
+    // Write raw RGBA data
+    file.write(reinterpret_cast<const char*>(frame_data.data()), frame_data.size());
+    
+    file.close();
+    std::cout << "Frame saved to: " << filename << " (" << frame_data.size() << " bytes)" << std::endl;
 }
 
 int main() {
@@ -267,10 +334,10 @@ int main() {
     Q << 
         .0, .0, .0, .0, .0, .0,           // x position (deterministic from velocity)
         .0, .0, .0, .0, .0, .0,           // y position (deterministic from velocity)
-        .0, .0, .001, .0, .0, .0,         // x velocity (some uncertainty)
-        .0, .0, .0, .001, .0, .0,         // y velocity (some uncertainty)
-        .0, .0, .0, .0, .01, .0,          // x acceleration (higher - car can change accel)
-        .0, .0, .0, .0, .0, .01;          // y acceleration (higher - car can turn)
+        .0, .0, .00001, .0, .0, .0,         // x velocity (some uncertainty)
+        .0, .0, .0, .00001, .0, .0,         // y velocity (some uncertainty)
+        .0, .0, .0, .0, .15, .0,          // x acceleration (higher - car can change accel)
+        .0, .0, .0, .0, .0, .15;          // y acceleration (higher - car can turn)
     R << std::pow(MEAS_NOISE_STDDEV, 2), 0, 
          0, std::pow(MEAS_NOISE_STDDEV, 2);
     P << 1.0, .0, 0, 0, 0, 0,
@@ -295,6 +362,10 @@ int main() {
     while (!glfwWindowShouldClose(window)) {
         // Poll and handle events
         glfwPollEvents();
+
+        // Get framebuffer size for consistent use throughout the loop
+        int display_w, display_h;
+        glfwGetFramebufferSize(window, &display_w, &display_h);
 
         // Real circle position is now updated by the test track in update_circle_position thread
         // No longer using mouse position
@@ -396,6 +467,80 @@ int main() {
                 test_track.reset();
             }
             
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Text("Frame Capture");
+            
+            if (ImGui::Button("Capture Frame")) {
+                frame_mutex.lock();
+                capture_frame = true;
+                frame_mutex.unlock();
+            }
+            
+            ImGui::SameLine();
+            frame_mutex.lock();
+            bool continuous_state = continuous_capture;
+            frame_mutex.unlock();
+            
+            if (ImGui::Checkbox("Continuous Capture", &continuous_state)) {
+                frame_mutex.lock();
+                continuous_capture = continuous_state;
+                frame_mutex.unlock();
+            }
+            
+            // Display frame information
+            frame_mutex.lock();
+            size_t frame_size = frame_data.size();
+            frame_mutex.unlock();
+            
+            static float last_brightness = -1.0f;
+            
+            if (frame_size > 0) {
+                ImGui::Text("Last captured frame:");
+                ImGui::Text("  Size: %zu bytes (RGBA)", frame_size);
+                ImGui::Text("  Dimensions: %dx%d", display_w, display_h);
+                ImGui::Text("  Format: RGBA (4 bytes/pixel)");
+                ImGui::Text("  Note: Image is vertically flipped");
+                
+                // Button to analyze frame
+                if (ImGui::Button("Analyze Frame")) {
+                    frame_mutex.lock();
+                    last_brightness = processFrameData(display_w, display_h);
+                    frame_mutex.unlock();
+                }
+                
+                ImGui::SameLine();
+                if (ImGui::Button("Save Frame")) {
+                    frame_mutex.lock();
+                    saveFrameToFile("captured_frame.raw", display_w, display_h);
+                    frame_mutex.unlock();
+                }
+                
+                if (last_brightness >= 0.0f) {
+                    ImGui::Text("  Average brightness: %.2f", last_brightness);
+                }
+                
+                // Show a sample of pixel values from the center
+                if (frame_size >= display_w * display_h * 4) {
+                    int center_x = display_w / 2;
+                    int center_y = display_h / 2;
+                    int pixel_index = ((display_h - center_y - 1) * display_w + center_x) * 4; // Account for vertical flip
+                    
+                    if (pixel_index + 3 < frame_size) {
+                        frame_mutex.lock();
+                        unsigned char r = frame_data[pixel_index];
+                        unsigned char g = frame_data[pixel_index + 1];
+                        unsigned char b = frame_data[pixel_index + 2];
+                        unsigned char a = frame_data[pixel_index + 3];
+                        frame_mutex.unlock();
+                        
+                        ImGui::Text("  Center pixel: R=%d G=%d B=%d A=%d", r, g, b, a);
+                    }
+                }
+            } else {
+                ImGui::Text("No frame captured yet");
+            }
+            
             ImGui::End();
         }
 
@@ -477,13 +622,19 @@ int main() {
 
         // Rendering
         ImGui::Render();
-        int display_w, display_h;
-        glfwGetFramebufferSize(window, &display_w, &display_h);
         glViewport(0, 0, display_w, display_h);
         glClearColor(clear_color.x * clear_color.w, clear_color.y * clear_color.w, 
                      clear_color.z * clear_color.w, clear_color.w);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        // Capture frame data if requested
+        frame_mutex.lock();
+        if (capture_frame || continuous_capture) {
+            captureFrameData(display_w, display_h);
+            capture_frame = false; // Reset single capture flag
+        }
+        frame_mutex.unlock();
 
         glfwSwapBuffers(window);
     }
