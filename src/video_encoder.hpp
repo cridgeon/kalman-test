@@ -5,6 +5,8 @@
 #include <string>
 #include <mutex>
 #include <chrono>
+#include <thread>
+#include <atomic>
 
 // AVCpp includes
 #include "../avcpp/src/av.h"
@@ -42,6 +44,50 @@ public:
         bool write(const uint8_t* data, size_t size) override;
         bool close() override;
         std::string getUri() const override { return m_filename; }
+    };
+
+    // Network output stream implementation
+    class NetworkOutputStream : public OutputStream {
+    public:
+        // Network configuration
+        struct NetworkConfig {
+            int timeout_ms = 5000;           // Connection timeout
+            int buffer_size = 1024 * 1024;   // 1MB buffer
+            std::string user_agent = "VideoEncoder/1.0";
+            std::string username;
+            std::string password;
+            bool tcp_nodelay = true;
+        };
+        
+    private:
+        std::string m_uri;
+        std::string m_protocol;
+        std::atomic<bool> m_connected{false};
+        std::atomic<bool> m_should_stop{false};
+        mutable std::mutex m_mutex;
+        NetworkConfig m_config;
+        
+        bool parseUri();
+        bool validateProtocol() const;
+        
+    public:
+        explicit NetworkOutputStream(const std::string& uri);
+        explicit NetworkOutputStream(const std::string& uri, const NetworkConfig& config);
+        
+        bool open() override;
+        bool write(const uint8_t* data, size_t size) override;
+        bool close() override;
+        std::string getUri() const override { return m_uri; }
+        
+        // Network-specific methods
+        bool isConnected() const { return m_connected.load(); }
+        
+        // Static utility methods
+        static std::vector<std::string> getAvailableProtocols();
+        static bool isProtocolAvailable(const std::string& protocol);
+        void setConfig(const NetworkConfig& config) { m_config = config; }
+        const NetworkConfig& getConfig() const { return m_config; }
+        std::string getProtocol() const { return m_protocol; }
     };
 
     struct Config {
@@ -102,6 +148,11 @@ public:
 
     // Convenience method for file output
     bool startRecordingToFile(const std::string& filename);
+    
+    // Convenience method for network output
+    bool startRecordingToNetwork(const std::string& uri);
+    bool startRecordingToNetwork(const std::string& uri, const NetworkOutputStream::NetworkConfig& config);
+    
     bool finalize(); // Finalize and close the stream
 
     // Status

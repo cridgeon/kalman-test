@@ -18,6 +18,7 @@
 #include <chrono>
 #include <vector>
 #include <fstream>
+#include <cstring>
 
 #include "kalman.hpp"
 #include "imgui.h"
@@ -703,7 +704,7 @@ int main() {
             bool continuous_state = continuous_capture;
             frame_mutex.unlock();
             
-            if (ImGui::Checkbox("Continuous Capture", &continuous_state)) {
+            if (ImGui::Checkbox("record to file", &continuous_state)) {
                 frame_mutex.lock();
                 bool was_capturing = continuous_capture;
                 continuous_capture = continuous_state;
@@ -728,6 +729,7 @@ int main() {
                             
                             // Start recording with timestamp in filename for uniqueness
                             std::string filename = "captured_video_" + std::to_string(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count()) + ".ts";
+                            // std::string filename = "http://127.0.0.1:8081/password";
                             if (video_encoder->startRecordingToFile(filename)) {
                                 std::cout << "Started video recording to " << filename << "..." << std::endl;
                             } else {
@@ -823,6 +825,69 @@ int main() {
                             if (video_encoder) {
                                 video_encoder->stopRecording();
                             }
+                        }
+                    }
+                }
+                
+                // Network streaming controls
+                ImGui::Separator();
+                ImGui::Text("Network Streaming:");
+                
+                static char network_uri[256] = "tcp://localhost:1234";
+                ImGui::InputText("Network URI", network_uri, sizeof(network_uri));
+                
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Supported Examples:\nTCP: tcp://localhost:1234\nUDP: udp://localhost:1234\nHTTP: http://localhost:8080/stream\nRTP: rtp://localhost:5004");
+                }
+                
+                // Show protocol help
+                if (ImGui::Button("Show Available Protocols")) {
+                    auto available = VideoEncoder::NetworkOutputStream::getAvailableProtocols();
+                    std::cout << "Available network protocols: ";
+                    for (size_t i = 0; i < available.size(); ++i) {
+                        std::cout << available[i];
+                        if (i < available.size() - 1) std::cout << ", ";
+                    }
+                    std::cout << std::endl;
+                }
+                
+                // Quick protocol presets
+                ImGui::SameLine();
+                if (ImGui::Button("TCP")) { strcpy(network_uri, "tcp://localhost:1234"); }
+                ImGui::SameLine();
+                if (ImGui::Button("UDP")) { strcpy(network_uri, "udp://localhost:5678"); }
+                ImGui::SameLine();
+                if (ImGui::Button("HTTP")) { strcpy(network_uri, "http://localhost:8080/stream.ts"); }
+                
+                ImGui::SameLine(); 
+                if (!is_recording) {
+                    if (ImGui::Button("Start Network Stream")) {
+                        std::lock_guard<std::mutex> lock(video_mutex);
+                        if (video_encoder) {
+                            VideoEncoder::Config config = video_encoder->getConfig();
+                            config.width = display_w;
+                            config.height = display_h;
+                            video_encoder->setConfig(config);
+                            
+                            // Configure network streaming options for better performance
+                            VideoEncoder::NetworkOutputStream::NetworkConfig net_config;
+                            net_config.timeout_ms = 10000;  // 10 second timeout
+                            net_config.buffer_size = 2 * 1024 * 1024;  // 2MB buffer
+                            net_config.user_agent = "KalmanTestApp/1.0";
+                            
+                            if (video_encoder->startRecordingToNetwork(std::string(network_uri), net_config)) {
+                                std::cout << "Started network streaming to: " << network_uri << std::endl;
+                            } else {
+                                std::cerr << "Failed to start network streaming" << std::endl;
+                            }
+                        }
+                    }
+                } else {
+                    if (ImGui::Button("Stop Network Stream")) {
+                        std::lock_guard<std::mutex> lock(video_mutex);
+                        if (video_encoder) {
+                            video_encoder->stopRecording();
+                            std::cout << "Stopped network streaming" << std::endl;
                         }
                     }
                 }
