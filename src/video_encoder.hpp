@@ -21,6 +21,29 @@
 
 class VideoEncoder {
 public:
+    // Forward declaration for output stream interface
+    class OutputStream {
+    public:
+        virtual ~OutputStream() = default;
+        virtual bool open() = 0;
+        virtual bool write(const uint8_t* data, size_t size) = 0;
+        virtual bool close() = 0;
+        virtual std::string getUri() const = 0;
+    };
+
+    // File output stream implementation
+    class FileOutputStream : public OutputStream {
+    private:
+        std::string m_filename;
+        
+    public:
+        explicit FileOutputStream(const std::string& filename);
+        bool open() override;
+        bool write(const uint8_t* data, size_t size) override;
+        bool close() override;
+        std::string getUri() const override { return m_filename; }
+    };
+
     struct Config {
         int width;
         int height;
@@ -42,11 +65,18 @@ public:
 
 private:
     Config m_config;
-    std::vector<av::VideoFrame> m_frames;
-    std::vector<uint64_t> m_frame_timestamps;
+    std::unique_ptr<OutputStream> m_output_stream;
     bool m_initialized;
+    bool m_stream_opened;
     std::chrono::steady_clock::time_point m_recording_start_time;
     mutable std::mutex m_mutex;
+    
+    // Encoding context
+    std::unique_ptr<av::FormatContext> m_format_context;
+    std::unique_ptr<av::VideoEncoderContext> m_encoder;
+    std::unique_ptr<av::VideoRescaler> m_rescaler;
+    std::unique_ptr<av::Stream> m_stream;
+    uint64_t m_frame_count;
 
     static bool s_av_initialized;
     static std::mutex s_init_mutex;
@@ -60,7 +90,7 @@ public:
     const Config& getConfig() const { return m_config; }
 
     // Recording control
-    bool startRecording();
+    bool startRecording(std::unique_ptr<OutputStream> output_stream);
     bool stopRecording();
     bool isRecording() const;
     
@@ -70,9 +100,9 @@ public:
     size_t getFrameCount() const;
     double getRecordingDuration() const; // in seconds
 
-    // Output
-    bool saveToFile(const std::string& filename);
-    void clearFrames();
+    // Convenience method for file output
+    bool startRecordingToFile(const std::string& filename);
+    bool finalize(); // Finalize and close the stream
 
     // Status
     bool isInitialized() const { return m_initialized; }
@@ -81,4 +111,6 @@ public:
 private:
     static void initializeAVCpp(int log_level = AV_LOG_WARNING);
     av::VideoFrame createRGBFrame(const std::vector<unsigned char>& rgba_data, int width, int height);
+    bool setupEncoder();
+    void cleanup();
 };

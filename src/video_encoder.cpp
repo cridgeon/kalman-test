@@ -7,7 +7,7 @@ bool VideoEncoder::s_av_initialized = false;
 std::mutex VideoEncoder::s_init_mutex;
 
 VideoEncoder::VideoEncoder(const Config& config) 
-    : m_config(config), m_initialized(false) {
+    : m_config(config), m_initialized(false), m_stream_opened(false), m_frame_count(0) {
     initializeAVCpp(m_config.log_level);
 }
 
@@ -22,17 +22,29 @@ void VideoEncoder::setConfig(const Config& config) {
     m_initialized = false; // Force re-initialization with new config
 }
 
-bool VideoEncoder::startRecording() {
+bool VideoEncoder::startRecording(std::unique_ptr<OutputStream> output_stream) {
     std::lock_guard<std::mutex> lock(m_mutex);
     
     if (m_initialized) {
         return true; // Already recording
     }
     
+    if (!output_stream) {
+        std::cerr << "No output stream provided" << std::endl;
+        return false;
+    }
+    
     try {
-        m_frames.clear();
-        m_frame_timestamps.clear();
+        m_output_stream = std::move(output_stream);
+        m_frame_count = 0;
         m_recording_start_time = std::chrono::steady_clock::now();
+        
+        // Set up the encoder and format context
+        if (!setupEncoder()) {
+            cleanup();
+            return false;
+        }
+        
         m_initialized = true;
         
         std::cout << "Video encoder started: " << m_config.width << "x" << m_config.height 
@@ -42,14 +54,55 @@ bool VideoEncoder::startRecording() {
         return true;
     } catch (const std::exception& e) {
         std::cerr << "Failed to start video recording: " << e.what() << std::endl;
+        cleanup();
         return false;
     }
 }
 
 bool VideoEncoder::stopRecording() {
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_initialized = false;
-    return true;
+    return finalize();
+}
+
+bool VideoEncoder::finalize() {
+    if (!m_initialized) {
+        return true;
+    }
+    
+    try {
+        // Flush encoder
+        if (m_encoder && m_format_context) {
+            std::error_code ec;
+            while (true) {
+                av::Packet packet = m_encoder->encode(ec);
+                if (ec || !packet) {
+                    break;
+                }
+                
+                packet.setStreamIndex(0);
+                m_format_context->writePacket(packet, ec);
+                if (ec) {
+                    std::cerr << "Failed to write flush packet: " << ec.message() << std::endl;
+                    break;
+                }
+            }
+            
+            // Write trailer
+            m_format_context->writeTrailer(ec);
+            if (ec) {
+                std::cerr << "Failed to write trailer: " << ec.message() << std::endl;
+            }
+        }
+        
+        cleanup();
+        std::cout << "Video recording finalized (" << m_frame_count << " frames)" << std::endl;
+        return true;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Error finalizing video: " << e.what() << std::endl;
+        cleanup();
+        return false;
+    }
 }
 
 bool VideoEncoder::isRecording() const {
@@ -75,9 +128,9 @@ bool VideoEncoder::addFrame(const std::vector<unsigned char>& rgba_data, int wid
     }
     
     try {
-        av::VideoFrame frame = createRGBFrame(rgba_data, width, height);
+        av::VideoFrame rgb_frame = createRGBFrame(rgba_data, width, height);
         
-        if (!frame.isValid()) {
+        if (!rgb_frame.isValid()) {
             std::cerr << "Failed to create valid VideoFrame" << std::endl;
             return false;
         }
@@ -86,10 +139,44 @@ bool VideoEncoder::addFrame(const std::vector<unsigned char>& rgba_data, int wid
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_recording_start_time);
         
-        m_frames.push_back(std::move(frame));
-        m_frame_timestamps.push_back(elapsed.count());
+        av::VideoFrame output_frame;
+        std::error_code ec;
         
-        std::cout << "Captured frame " << m_frames.size() << " at " << elapsed.count() << "ms" << std::endl;
+        // Convert pixel format if necessary
+        if (m_config.input_pixfmt != m_config.output_pixfmt) {
+            output_frame = av::VideoFrame(m_config.output_pixfmt, m_config.width, m_config.height, 1);
+            m_rescaler->rescale(output_frame, rgb_frame, ec);
+            if (ec) {
+                std::cerr << "Failed to rescale frame: " << ec.message() << std::endl;
+                return false;
+            }
+        } else {
+            output_frame = rgb_frame;
+        }
+        
+        // Set frame properties
+        output_frame.setTimeBase(m_encoder->timeBase());
+        output_frame.setPts(av::Timestamp{static_cast<int64_t>(elapsed.count()), m_encoder->timeBase()});
+        output_frame.setStreamIndex(0);
+        
+        // Encode the frame
+        av::Packet packet = m_encoder->encode(output_frame, ec);
+        if (ec) {
+            std::cerr << "Encoding error: " << ec.message() << std::endl;
+            return false;
+        }
+        
+        if (packet) {
+            packet.setStreamIndex(0);
+            m_format_context->writePacket(packet, ec);
+            if (ec) {
+                std::cerr << "Failed to write packet: " << ec.message() << std::endl;
+                return false;
+            }
+        }
+        
+        m_frame_count++;
+        std::cout << "Encoded and wrote frame " << m_frame_count << " at " << elapsed.count() << "ms" << std::endl;
         
         return true;
         
@@ -101,13 +188,13 @@ bool VideoEncoder::addFrame(const std::vector<unsigned char>& rgba_data, int wid
 
 size_t VideoEncoder::getFrameCount() const {
     std::lock_guard<std::mutex> lock(m_mutex);
-    return m_frames.size();
+    return m_frame_count;
 }
 
 double VideoEncoder::getRecordingDuration() const {
     std::lock_guard<std::mutex> lock(m_mutex);
     
-    if (!m_initialized || m_frame_timestamps.empty()) {
+    if (!m_initialized) {
         return 0.0;
     }
     
@@ -116,32 +203,46 @@ double VideoEncoder::getRecordingDuration() const {
     return elapsed.count() / 1000.0;
 }
 
-bool VideoEncoder::saveToFile(const std::string& filename) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    
-    if (m_frames.empty()) {
-        std::cout << "No frames to save" << std::endl;
-        return false;
-    }
-    
-    std::cout << "Saving " << m_frames.size() << " frames to " << filename << std::endl;
-    
+bool VideoEncoder::startRecordingToFile(const std::string& filename) {
+    auto file_stream = std::make_unique<FileOutputStream>(filename);
+    return startRecording(std::move(file_stream));
+}
+
+// FileOutputStream implementation
+VideoEncoder::FileOutputStream::FileOutputStream(const std::string& filename) : m_filename(filename) {}
+
+bool VideoEncoder::FileOutputStream::open() {
+    // The actual file opening is handled by avcpp FormatContext
+    return true;
+}
+
+bool VideoEncoder::FileOutputStream::write(const uint8_t* data, size_t size) {
+    // For file output, writing is handled by avcpp FormatContext
+    // This method is here for interface completeness
+    return true;
+}
+
+bool VideoEncoder::FileOutputStream::close() {
+    // Closing is handled by avcpp FormatContext
+    return true;
+}
+
+bool VideoEncoder::setupEncoder() {
     try {
         std::error_code ec;
         
         // Create output format context
         av::OutputFormat ofrmt;
-        ofrmt.setFormat(m_config.format, filename);
+        ofrmt.setFormat(m_config.format, m_output_stream->getUri());
         
-        av::FormatContext octx;
-        octx.setFormat(ofrmt);
+        m_format_context = std::make_unique<av::FormatContext>();
+        m_format_context->setFormat(ofrmt);
         
         // Set up encoder  
         av::Codec codec;
         if (m_config.codec == "h264") {
             codec = av::findEncodingCodec(AVCodecID::AV_CODEC_ID_H264);
         } else {
-            // Add support for other codecs as needed
             codec = av::findEncodingCodec(AVCodecID::AV_CODEC_ID_H264);
         }
         
@@ -150,136 +251,83 @@ bool VideoEncoder::saveToFile(const std::string& filename) {
             return false;
         }
         
-        av::VideoEncoderContext encoder(codec);
+        m_encoder = std::make_unique<av::VideoEncoderContext>(codec);
         
         // Configure encoder settings
-        encoder.setWidth(m_config.width);
-        encoder.setHeight(m_config.height);
-        encoder.setPixelFormat(m_config.output_pixfmt);
-        encoder.setTimeBase(av::Rational{1, 1000});    // 1ms time base
-        encoder.setBitRate(m_config.bitrate);
+        m_encoder->setWidth(m_config.width);
+        m_encoder->setHeight(m_config.height);
+        m_encoder->setPixelFormat(m_config.output_pixfmt);
+        m_encoder->setTimeBase(av::Rational{1, 1000});    // 1ms time base
+        m_encoder->setBitRate(m_config.bitrate);
         
         // Open the encoder
-        encoder.open(codec, ec);
+        m_encoder->open(codec, ec);
         if (ec) {
             std::cerr << "Failed to open encoder: " << ec.message() << std::endl;
             return false;
         }
         
         // Add video stream
-        av::Stream ost = octx.addStream(encoder);
-        ost.setFrameRate(av::Rational{m_config.framerate_num, m_config.framerate_den});
+        auto stream = m_format_context->addStream(*m_encoder);
+        stream.setFrameRate(av::Rational{m_config.framerate_num, m_config.framerate_den});
         
-        // Open output file
-        octx.openOutput(filename, ec);
+        // Open output file/stream
+        m_format_context->openOutput(m_output_stream->getUri(), ec);
         if (ec) {
-            std::cerr << "Failed to open output file: " << ec.message() << std::endl;
+            std::cerr << "Failed to open output: " << ec.message() << std::endl;
             return false;
         }
         
         // Write header
-        octx.writeHeader(ec);
+        m_format_context->writeHeader(ec);
         if (ec) {
             std::cerr << "Failed to write header: " << ec.message() << std::endl;
             return false;
         }
         
-        // Create video rescaler to convert RGB24 to output format if needed
-        av::VideoRescaler rescaler;
-        
-        // Process each frame
-        for (size_t i = 0; i < m_frames.size(); ++i) {
-            auto& rgb_frame = m_frames[i];
-            
-            av::VideoFrame output_frame;
-            
-            // Convert pixel format if necessary
-            if (m_config.input_pixfmt != m_config.output_pixfmt) {
-                output_frame = av::VideoFrame(m_config.output_pixfmt, m_config.width, m_config.height, 1);
-                rescaler.rescale(output_frame, rgb_frame, ec);
-                if (ec) {
-                    std::cerr << "Failed to rescale frame " << i << ": " << ec.message() << std::endl;
-                    continue;
-                }
-            } else {
-                output_frame = rgb_frame;
-            }
-            
-            // Set frame properties
-            output_frame.setTimeBase(encoder.timeBase());
-            output_frame.setPts(av::Timestamp{static_cast<int64_t>(m_frame_timestamps[i]), encoder.timeBase()});
-            output_frame.setStreamIndex(0);
-            
-            // Encode the frame
-            av::Packet packet = encoder.encode(output_frame, ec);
-            if (ec) {
-                std::cerr << "Encoding error for frame " << i << ": " << ec.message() << std::endl;
-                continue;
-            }
-            
-            if (packet) {
-                packet.setStreamIndex(0);
-                octx.writePacket(packet, ec);
-                if (ec) {
-                    std::cerr << "Failed to write packet for frame " << i << ": " << ec.message() << std::endl;
-                }
-            }
+        // Create video rescaler if needed
+        if (m_config.input_pixfmt != m_config.output_pixfmt) {
+            m_rescaler = std::make_unique<av::VideoRescaler>();
         }
         
-        // Flush encoder
-        while (true) {
-            av::Packet packet = encoder.encode(ec);
-            if (ec || !packet) {
-                break;
-            }
-            
-            packet.setStreamIndex(0);
-            octx.writePacket(packet, ec);
-            if (ec) {
-                std::cerr << "Failed to write flush packet: " << ec.message() << std::endl;
-                break;
-            }
-        }
-        
-        // Write trailer
-        octx.writeTrailer(ec);
-        if (ec) {
-            std::cerr << "Failed to write trailer: " << ec.message() << std::endl;
-        }
-        
-        std::cout << "Video saved successfully: " << filename 
-                  << " (" << m_frames.size() << " frames)" << std::endl;
-        
+        m_stream_opened = true;
         return true;
         
     } catch (const std::exception& e) {
-        std::cerr << "Error saving video: " << e.what() << std::endl;
+        std::cerr << "Error setting up encoder: " << e.what() << std::endl;
         return false;
     }
 }
 
-void VideoEncoder::clearFrames() {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_frames.clear();
-    m_frame_timestamps.clear();
+void VideoEncoder::cleanup() {
+    if (m_output_stream) {
+        m_output_stream->close();
+        m_output_stream.reset();
+    }
+    
+    m_encoder.reset();
+    m_format_context.reset();
+    m_rescaler.reset();
+    
+    m_initialized = false;
+    m_stream_opened = false;
 }
+
 
 std::string VideoEncoder::getStatusString() const {
     std::lock_guard<std::mutex> lock(m_mutex);
     
-    if (!m_initialized) {
+    if (!m_initialized || !m_stream_opened) {
         return "Not recording";
     }
     
     // Calculate duration directly without calling getRecordingDuration()
     double duration = 0.0;
-    if (!m_frame_timestamps.empty()) {
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_recording_start_time);
-        duration = elapsed.count() / 1000.0;
-    }
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_recording_start_time);
+    duration = elapsed.count() / 1000.0;
     
-    return "Recording: " + std::to_string(m_frames.size()) + " frames (" 
+    return "Recording: " + std::to_string(m_frame_count) + " frames (" 
            + std::to_string(duration) + "s)";
 }
 
