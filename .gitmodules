@@ -1,6 +1,12 @@
 [submodule "eigen"]
 	path = eigen
 	url = https://github.com/PX4/eigen.git
+[submodule "glfw"]
+	path = glfw
+	url = https://github.com/glfw/glfw.git
+[submodule "imgui"]
+	path = imgui
+	url = https://github.com/ocornut/imgui.git
 [submodule "kalman-cpp"]
 	path = kalman-cpp
 	url = https://github.com/cridgeon/kalman-cpp.git
