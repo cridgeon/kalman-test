@@ -57,6 +57,7 @@ add_subdirectory(avcpp)
 # Add main executable
 add_executable(main
     src/main.cpp
+    src/video_encoder.cpp
     pid-controller/pid.cpp
 )
 

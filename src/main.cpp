@@ -28,19 +28,7 @@
 #include <random>
 #include "pid-controller/pid.hpp"
 #include "test_track.hpp"
-
-// AVCpp includes for video encoding
-#include "avcpp/src/av.h"
-#include "avcpp/src/ffmpeg.h"
-#include "avcpp/src/format.h"
-#include "avcpp/src/formatcontext.h"
-#include "avcpp/src/codec.h"
-#include "avcpp/src/codeccontext.h"
-#include "avcpp/src/frame.h"
-#include "avcpp/src/packet.h"
-#include "avcpp/src/pixelformat.h"
-#include "avcpp/src/videorescaler.h"
-#include "avcpp/src/averror.h"
+#include "video_encoder.hpp"
 
 using namespace std::chrono;
 #define GET_SYS_MILLIS() duration_cast<milliseconds>(system_clock::now().time_since_epoch())
@@ -77,14 +65,9 @@ bool capture_frame = false;
 bool continuous_capture = false;
 std::mutex frame_mutex;
 
-// Video encoding variables
-std::vector<av::VideoFrame> captured_frames;
-std::vector<uint64_t> frame_timestamps; // Store frame timestamps in milliseconds
-bool video_encoder_initialized = false;
+// Video encoder instance
+std::unique_ptr<VideoEncoder> video_encoder;
 std::mutex video_mutex;
-int video_width = 0;
-int video_height = 0;
-std::chrono::steady_clock::time_point recording_start_time;
 
 KalmanFilter filter;
 
@@ -222,6 +205,8 @@ void captureFrameData(int width, int height) {
         std::cerr << "OpenGL error during frame capture: " << error << std::endl;
     }
 }
+/*
+// Old video encoding functions - replaced by VideoEncoder class
 // Initialize video encoder for MPEG-TS format
 void initializeVideoEncoder(int width, int height) {
     std::lock_guard<std::mutex> lock(video_mutex);
@@ -428,6 +413,7 @@ void saveVideoToFile(const std::string& filename) {
         std::cerr << "Error saving video: " << e.what() << std::endl;
     }
 }
+*/
 // Example function demonstrating how to access individual pixels from the frame data
 float processFrameData(int width, int height) {
     if (frame_data.size() < width * height * 4) {
@@ -515,6 +501,14 @@ int main() {
     // Setup Platform/Renderer backends
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glsl_version);
+
+    // Initialize video encoder with default configuration
+    VideoEncoder::Config encoder_config;
+    encoder_config.width = WINDOW_WIDTH;
+    encoder_config.height = WINDOW_HEIGHT;
+    encoder_config.framerate_num = static_cast<int>(UPDATE_FREQ);
+    encoder_config.framerate_den = 1;
+    video_encoder = std::make_unique<VideoEncoder>(encoder_config);
 
     // Our state
     bool show_demo_window = false;
@@ -717,14 +711,40 @@ int main() {
                 
                 // Handle video recording start/stop
                 if (continuous_state && !was_capturing) {
-                    // Starting continuous capture - initialize video encoder
-                    initializeVideoEncoder(display_w, display_h);
-                    std::cout << "Started video recording..." << std::endl;
+                    // Starting continuous capture - start video recording
+                    std::lock_guard<std::mutex> lock(video_mutex);
+                    if (video_encoder) {
+                        // Stop recording first if it's currently recording
+                        if (video_encoder->isRecording()) {
+                            video_encoder->stopRecording();
+                        }
+                        
+                        try {
+                            // Update encoder config with current framebuffer size
+                            VideoEncoder::Config config = video_encoder->getConfig();
+                            config.width = display_w;
+                            config.height = display_h;
+                            video_encoder->setConfig(config);
+                            video_encoder->startRecording();
+                            std::cout << "Started video recording..." << std::endl;
+                        } catch (const std::exception& e) {
+                            std::cerr << "Failed to start video recording: " << e.what() << std::endl;
+                            // Reset capture state on failure
+                            frame_mutex.lock();
+                            continuous_capture = false;
+                            frame_mutex.unlock();
+                        }
+                    }
                 } else if (!continuous_state && was_capturing) {
                     // Stopping continuous capture - save video
-                    std::string filename = "captured_video_" + std::to_string(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count()) + ".ts";
-                    saveVideoToFile(filename);
-                    std::cout << "Stopped video recording and saved to " << filename << std::endl;
+                    std::lock_guard<std::mutex> lock(video_mutex);
+                    if (video_encoder && video_encoder->isRecording()) {
+                        video_encoder->stopRecording();
+                        std::string filename = "captured_video_" + std::to_string(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count()) + ".ts";
+                        video_encoder->saveToFile(filename);
+                        video_encoder->clearFrames();
+                        std::cout << "Stopped video recording and saved to " << filename << std::endl;
+                    }
                 }
             }
             
@@ -734,16 +754,17 @@ int main() {
             frame_mutex.unlock();
                         // Display video recording information
             video_mutex.lock();
-            size_t recorded_frames = captured_frames.size();
-            bool is_recording = video_encoder_initialized && continuous_capture;
+            size_t recorded_frames = video_encoder ? video_encoder->getFrameCount() : 0;
+            bool is_recording = video_encoder ? video_encoder->isRecording() : false;
             video_mutex.unlock();
             
             if (is_recording) {
                 ImGui::Text("🔴 Recording: %zu frames captured", recorded_frames);
                 if (recorded_frames > 0) {
-                    auto now = std::chrono::steady_clock::now();
-                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - recording_start_time);
-                    ImGui::Text("   Duration: %ld seconds", elapsed.count());
+                    video_mutex.lock();
+                    double duration = video_encoder ? video_encoder->getRecordingDuration() : 0.0;
+                    video_mutex.unlock();
+                    ImGui::Text("   Duration: %.1f seconds", duration);
                 }
             } else if (recorded_frames > 0) {
                 ImGui::Text("⏹️ Ready to save: %zu frames", recorded_frames);
@@ -772,15 +793,20 @@ int main() {
                 
                 // Add manual video save button
                 video_mutex.lock();
-                bool has_video_frames = captured_frames.size() > 0;
+                bool has_video_frames = video_encoder ? video_encoder->getFrameCount() > 0 : false;
                 video_mutex.unlock();
                 
                 if (has_video_frames) {
                     ImGui::SameLine();
                     if (ImGui::Button("Save Video")) {
                         std::string filename = "manual_video_" + std::to_string(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count()) + ".ts";
-                        saveVideoToFile(filename);
-                    }                }
+                        std::lock_guard<std::mutex> lock(video_mutex);
+                        if (video_encoder) {
+                            video_encoder->saveToFile(filename);
+                            video_encoder->clearFrames();
+                        }
+                    }
+                }
                 
                 if (last_brightness >= 0.0f) {
                     ImGui::Text("  Average brightness: %.2f", last_brightness);
@@ -902,7 +928,10 @@ int main() {
             
             // Add frame to video buffer if continuous capture is active
             if (continuous_capture && !frame_data.empty()) {
-                addFrameToVideo(frame_data, display_w, display_h);
+                std::lock_guard<std::mutex> lock(video_mutex);
+                if (video_encoder) {
+                    video_encoder->addFrame(frame_data, display_w, display_h);
+                }
             }
         }
         frame_mutex.unlock();
