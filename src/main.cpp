@@ -15,6 +15,8 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 
+#include "shader/all.hpp"
+
 using namespace std::chrono;
 #define GET_SYS_MILLIS() duration_cast<milliseconds>(system_clock::now().time_since_epoch())
 
@@ -46,7 +48,7 @@ std::mutex g_state_mutex;
 KalmanFilter filter;
 
 // Test track for realistic car movement
-TestTrack test_track(0.6f, 0.0f, 0.0f, 100.0f, 80.0f);
+TestTrack test_track(0.3f, 0.5f, 0.5f, 100.0f, 80.0f);
 
 // PID Controllers for x and y axes with more responsive gains
 PIDController pid_x(15.0, 1.5, 0.75, 0.0);  // Increased Kp and Kd for faster response
@@ -95,6 +97,8 @@ void update_circle_position() {
     while (g_running) {
         // Update real state from test track
         TestTrack::Position track_pos = test_track.update(1.0f / UPDATE_FREQ);
+        track_pos.x *= WINDOW_WIDTH;
+        track_pos.y *= WINDOW_HEIGHT;
         
         g_state_mutex.lock();
         g_real_state.x = track_pos.x;
@@ -102,8 +106,8 @@ void update_circle_position() {
         g_real_state.velocity_x = track_pos.vx;
         g_real_state.velocity_y = track_pos.vy;
         
-        g_measured_state.x = g_real_state.x + nd(gen);
-        g_measured_state.y = g_real_state.y + nd(gen);
+        g_measured_state.x = g_real_state.x + nd(gen) * WINDOW_WIDTH; // Scale noise to be more realistic
+        g_measured_state.y = g_real_state.y + nd(gen) * WINDOW_HEIGHT; // Scale noise to be more realistic
         position_queue.push({GET_SYS_MILLIS(), {g_measured_state.x, g_measured_state.y}});
 
         milliseconds now = GET_SYS_MILLIS();
@@ -207,9 +211,9 @@ void update_circle_position() {
 int main() {
     std::cout << "Multi-threaded Circle Animation with ImGui" << std::endl;
     
-    // Create and initialize rendering system
-    RenderingSystem renderer(WINDOW_WIDTH, WINDOW_HEIGHT, "Kalman Test - ImGui Demo");
-    if (!renderer.initialize()) {
+    // Get singleton instance and initialize rendering system
+    RenderingSystem& renderer = RenderingSystem::getInstance();
+    if (!renderer.initialize(WINDOW_WIDTH, WINDOW_HEIGHT, "Kalman Test - ImGui Demo")) {
         std::cerr << "Failed to initialize rendering system" << std::endl;
         return 1;
     }
@@ -321,17 +325,14 @@ int main() {
         // Create a fullscreen ImGui window for drawing
         // renderer.beginCanvas();
         
-        // Clear previous circles and add new ones to the circle renderer
-        CircleRenderer& circleRenderer = renderer.getCircleRenderer();
-        circleRenderer.clearCircles();
-        
         // Convert positions from current coordinate system to normalized coordinates [-1, 1]
         // Current system: positions are in [-1, 1] range already
-        circleRenderer.addCircle(real_x, real_y, real_r, real_color.x, real_color.y, real_color.z, real_color.w);
-        circleRenderer.addCircle(measured_x, measured_y, measured_r, measured_color.x, measured_color.y, measured_color.z, measured_color.w);
-        circleRenderer.addCircle(g_reported_state.x, g_reported_state.y, g_reported_state.radius, reported_color.x, reported_color.y, reported_color.z, reported_color.w);
-        circleRenderer.addCircle(estimated_x, estimated_y, estimated_r, estimated_color.x, estimated_color.y, estimated_color.z, estimated_color.w);
-        circleRenderer.addCircle(smoothed_x, smoothed_y, smoothed_r, smoothed_color.x, smoothed_color.y, smoothed_color.z, smoothed_color.w);
+        Render::circleFilled(real_x, real_y, real_r, real_color.x, real_color.y, real_color.z, real_color.w);
+        Render::circleFilled(measured_x, measured_y, measured_r, measured_color.x, measured_color.y, measured_color.z, measured_color.w);
+        Render::circleFilled(g_reported_state.x, g_reported_state.y, g_reported_state.radius, reported_color.x, reported_color.y, reported_color.z, reported_color.w);
+        Render::circleFilled(estimated_x, estimated_y, estimated_r, estimated_color.x, estimated_color.y, estimated_color.z, estimated_color.w);
+        Render::circleFilled(smoothed_x, smoothed_y, smoothed_r, smoothed_color.x, smoothed_color.y, smoothed_color.z, smoothed_color.w);
+        Render::circleFilled(WINDOW_WIDTH / 4, WINDOW_HEIGHT / 4, 10, 0.3, 0.2, 0.3, 0.5);
         // renderer.endCanvas();
 
         // Show controls window
@@ -492,6 +493,7 @@ int main() {
     }
 
     // Signal the update thread to stop and wait for it
+    Render::destroyAllShaders();
     g_running = false;
     update_thread.join();
     cleanupImGui();

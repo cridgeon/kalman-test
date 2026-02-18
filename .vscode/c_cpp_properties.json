@@ -4,13 +4,21 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/**",
-                "${workspaceFolder}/kalman-cpp"
+                "${workspaceFolder}/kalman-cpp",
+                "${workspaceFolder}/eigen",
+                "${workspaceFolder}/imgui",
+                "${workspaceFolder}/imgui/backends",
+                "${workspaceFolder}/glfw/include",
+                "${workspaceFolder}/glfw/deps",
+                "${workspaceFolder}/pid-controller"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/gcc",
             "cStandard": "c17",
-            "cppStandard": "gnu++17",
-            "intelliSenseMode": "linux-gcc-x64"
+            "cppStandard": "c++14",
+            "intelliSenseMode": "linux-gcc-x64",
+            "compileCommands": "${workspaceFolder}/build/compile_commands.json",
+            "configurationProvider": "ms-vscode.cmake-tools"
         }
     ],
     "version": 4

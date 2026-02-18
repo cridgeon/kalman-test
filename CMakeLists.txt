@@ -5,6 +5,15 @@ project(kalman-test)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Set default build type to Debug if not specified
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
+endif()
+
+# Enable debug symbols for Debug builds
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O0")
+set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -g -O0")
+
 # Include Eigen header-only library
 include_directories(${CMAKE_SOURCE_DIR}/eigen)
 
@@ -31,6 +40,7 @@ target_include_directories(imgui PUBLIC
     ${IMGUI_DIR}
     ${IMGUI_DIR}/backends
     ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/src
 )
 
 target_link_libraries(imgui glfw)
@@ -54,15 +64,12 @@ target_include_directories(kalman-lib PUBLIC
 add_subdirectory(pid-controller)
 
 # Add main executable
-add_executable(main
-    src/main.cpp
-    src/rendering_system.cpp
-    src/circle_renderer.cpp
-    src/shader.cpp
-    src/framebuffer.cpp
-    src/postprocessor.cpp
-    pid-controller/pid.cpp
+file(GLOB MAIN_SOURCES
+    "src/*.cpp"
+    "src/**/*.cpp"
+    "pid-controller/pid.cpp"
 )
+add_executable(main ${MAIN_SOURCES})
 
 # Link kalman library to main executable
 target_link_libraries(main kalman-lib imgui glfw OpenGL::GL ${CMAKE_DL_LIBS})

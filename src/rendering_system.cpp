@@ -3,28 +3,32 @@
 #include <glad/gl.h>
 #include <iostream>
 
-RenderingSystem::RenderingSystem(int window_width, int window_height, const std::string& window_title)
-    : window_width_(window_width), window_height_(window_height), window_title_(window_title),
-      window_(nullptr), clear_color_{0, 0, 0, 255}, glsl_version_("#version 130"),
+RenderingSystem::RenderingSystem()
+    : window_width_(0), window_height_(0), window_title_(""),
+      window_(nullptr), clear_color_{0.05f, 0.05f, 0.08f, 1.0f}, glsl_version_("#version 130"),
       initialized_(false) {
+}
+
+RenderingSystem& RenderingSystem::getInstance() {
+    static RenderingSystem instance;
+    return instance;
 }
 
 RenderingSystem::~RenderingSystem() {
     shutdown();
 }
 
-bool RenderingSystem::initialize() {
+bool RenderingSystem::initialize(int window_width, int window_height, const std::string& window_title) {
     if (initialized_) {
         return true;
     }
     
+    window_width_ = window_width;
+    window_height_ = window_height;
+    window_title_ = window_title;
+    
     if (!setupGLFW()) {
         std::cerr << "Failed to setup GLFW" << std::endl;
-        return false;
-    }
-    
-    if (!circle_renderer_.initialize(window_width_, window_height_)) {
-        std::cerr << "Failed to initialize circle renderer" << std::endl;
         return false;
     }
     
@@ -86,26 +90,20 @@ void RenderingSystem::beginFrame() {
     int display_w, display_h;
     glfwGetFramebufferSize(window_, &display_w, &display_h);
     if (display_w != window_width_ || display_h != window_height_) {
-        circle_renderer_.resize(display_w, display_h);
         window_width_ = display_w;
         window_height_ = display_h;
     }
+
+    // Clear the framebuffer and render ImGui to it
+    glClearColor(clear_color_[0], clear_color_[1], clear_color_[2], clear_color_[3]);
+    glClear(GL_COLOR_BUFFER_BIT);
 }
 
 void RenderingSystem::endFrame() {
     if (!initialized_) return;
-    
-    // Clear the framebuffer and render ImGui to it
-    glClearColor(clear_color_[0] * clear_color_[3], clear_color_[1] * clear_color_[3], 
-        clear_color_[2] * clear_color_[3], clear_color_[3]);
-    glClear(GL_COLOR_BUFFER_BIT);
-        
-    // Render circles first (before ImGui)
-    circle_renderer_.render();
-
 }
 
-void RenderingSystem::setClearColor(const unsigned char col[4]) {
+void RenderingSystem::setClearColor(const float col[4]) {
     for (int i = 0; i < 4; ++i) {
         clear_color_[i] = col[i];
     }

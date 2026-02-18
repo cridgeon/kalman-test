@@ -43,6 +43,8 @@ public:
 
     void render();
 
+    void destroy();
+
 private:
     unsigned int programID;
     mutable std::unordered_map<std::string, int> uniformLocationCache;

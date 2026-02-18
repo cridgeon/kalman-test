@@ -6,9 +6,7 @@
 Shader::Shader() : programID(0) {}
 
 Shader::~Shader() {
-    if (programID != 0) {
-        glDeleteProgram(programID);
-    }
+    this->destroy();
 }
 
 Shader::Shader(Shader&& other) noexcept : programID(other.programID), uniformLocationCache(std::move(other.uniformLocationCache)) {
@@ -64,11 +62,19 @@ void Shader::use() const {
 
 void Shader::render() {
     // Render fullscreen quad
-    glBindVertexArray(vao_);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
-    glBindVertexArray(0);
+    // glBindVertexArray(vao_);
+    // glDrawArrays(GL_TRIANGLES, 0, 6);
+    // glBindVertexArray(0);
     
-    glDisable(GL_BLEND);
+    // glDisable(GL_BLEND);
+}
+
+void Shader::destroy()
+{
+    if (programID != 0) {
+        glDeleteProgram(programID);
+        programID = 0;
+    }
 }
 
 unsigned int Shader::compileShader(const std::string &source, unsigned int type)
