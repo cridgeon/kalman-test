@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.10)
 project(kalman-test)
 
 # Set C++ standard
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Include Eigen header-only library
@@ -52,6 +52,7 @@ target_include_directories(kalman-lib PUBLIC
 
 # Add PID Controller subdirectory
 add_subdirectory(pid-controller)
+add_subdirectory(avcpp)
 
 # Add main executable
 add_executable(main
@@ -60,7 +61,14 @@ add_executable(main
 )
 
 # Link kalman library to main executable
-target_link_libraries(main kalman-lib imgui glfw OpenGL::GL ${CMAKE_DL_LIBS})
+target_link_libraries(main 
+    kalman-lib 
+    imgui 
+    glfw 
+    OpenGL::GL 
+    avcpp::avcpp
+    ${CMAKE_DL_LIBS}
+)
 
 # Include directories for main
 target_include_directories(main PRIVATE

@@ -29,6 +29,19 @@
 #include "pid-controller/pid.hpp"
 #include "test_track.hpp"
 
+// AVCpp includes for video encoding
+#include "avcpp/src/av.h"
+#include "avcpp/src/ffmpeg.h"
+#include "avcpp/src/format.h"
+#include "avcpp/src/formatcontext.h"
+#include "avcpp/src/codec.h"
+#include "avcpp/src/codeccontext.h"
+#include "avcpp/src/frame.h"
+#include "avcpp/src/packet.h"
+#include "avcpp/src/pixelformat.h"
+#include "avcpp/src/videorescaler.h"
+#include "avcpp/src/averror.h"
+
 using namespace std::chrono;
 #define GET_SYS_MILLIS() duration_cast<milliseconds>(system_clock::now().time_since_epoch())
 
@@ -63,6 +76,15 @@ std::vector<unsigned char> frame_data;
 bool capture_frame = false;
 bool continuous_capture = false;
 std::mutex frame_mutex;
+
+// Video encoding variables
+std::vector<av::VideoFrame> captured_frames;
+std::vector<uint64_t> frame_timestamps; // Store frame timestamps in milliseconds
+bool video_encoder_initialized = false;
+std::mutex video_mutex;
+int video_width = 0;
+int video_height = 0;
+std::chrono::steady_clock::time_point recording_start_time;
 
 KalmanFilter filter;
 
@@ -200,7 +222,212 @@ void captureFrameData(int width, int height) {
         std::cerr << "OpenGL error during frame capture: " << error << std::endl;
     }
 }
+// Initialize video encoder for MPEG-TS format
+void initializeVideoEncoder(int width, int height) {
+    std::lock_guard<std::mutex> lock(video_mutex);
+    
+    if (video_encoder_initialized) {
+        return; // Already initialized
+    }
+    
+    video_width = width;
+    video_height = height;
+    captured_frames.clear();
+    frame_timestamps.clear();
+    
+    // Initialize avcpp library
+    av::init();
+    av::setFFmpegLoggingLevel(AV_LOG_WARNING);
+    
+    recording_start_time = std::chrono::steady_clock::now();
+    video_encoder_initialized = true;
+    
+    std::cout << "Video encoder initialized for " << width << "x" << height << " MPEG-TS recording" << std::endl;
+}
 
+// Add frame to video buffer during continuous capture
+void addFrameToVideo(const std::vector<unsigned char>& rgba_data, int width, int height) {
+    std::lock_guard<std::mutex> lock(video_mutex);
+    
+    if (!video_encoder_initialized || !continuous_capture) {
+        return;
+    }
+    
+    try {
+        // Create a properly allocated VideoFrame for RGB24
+        av::VideoFrame frame(AV_PIX_FMT_RGB24, width, height, 1);
+        
+        if (!frame.isValid()) {
+            std::cerr << "Failed to create valid VideoFrame" << std::endl;
+            return;
+        }
+        
+        // Get the frame data pointers and linesize
+        uint8_t* frame_data = frame.data(0);
+        int linesize = frame.bufferSize() / frame.height(); // will give height * bytes per pixel 
+        
+        // Convert RGBA to RGB24 and copy directly to frame buffer
+        for (int y = 0; y < height; y++) {
+            uint8_t* dst_row = frame_data + y * linesize;
+            
+            for (int x = 0; x < width; x++) {
+                int rgba_index = ((height - y - 1) * width + x) * 4; // Flip vertically (OpenGL convention)
+                int rgb_index = x * 3;
+                
+                dst_row[rgb_index]     = rgba_data[rgba_index];     // R
+                dst_row[rgb_index + 1] = rgba_data[rgba_index + 1]; // G
+                dst_row[rgb_index + 2] = rgba_data[rgba_index + 2]; // B
+                // Skip alpha channel
+            }
+        }
+        
+        // Calculate timestamp since recording started
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - recording_start_time);
+        
+        captured_frames.push_back(frame);
+        frame_timestamps.push_back(elapsed.count());
+        
+        std::cout << "Captured frame " << captured_frames.size() << " at " << elapsed.count() << "ms" << std::endl;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Error adding frame to video: " << e.what() << std::endl;
+    }
+}
+
+// Save accumulated frames as MPEG-TS video file
+void saveVideoToFile(const std::string& filename) {
+    std::lock_guard<std::mutex> lock(video_mutex);
+    
+    if (!video_encoder_initialized || captured_frames.empty()) {
+        std::cout << "No frames to save or encoder not initialized" << std::endl;
+        return;
+    }
+    
+    std::cout << "Saving " << captured_frames.size() << " frames to " << filename << std::endl;
+    
+    try {
+        std::error_code ec;
+
+        // Create output format context for MPEG-TS
+        av::OutputFormat ofrmt;
+        ofrmt.setFormat("mpegts", filename);
+        
+        av::FormatContext octx;
+        octx.setFormat(ofrmt);
+        
+        // Set up H.264 encoder
+        av::Codec codec = av::findEncodingCodec(AVCodecID::AV_CODEC_ID_H264);
+        if (codec.isNull()) {
+            std::cerr << "H.264 encoder not found" << std::endl;
+            return;
+        }
+        
+        av::VideoEncoderContext encoder(codec);
+        
+        // Configure encoder settings
+        encoder.setWidth(video_width);
+        encoder.setHeight(video_height);
+        encoder.setPixelFormat(AV_PIX_FMT_YUV420P);  // Standard format for H.264
+        encoder.setTimeBase(av::Rational{1, 1000});    // 1ms time base
+        encoder.setBitRate(2000000);  // 2 Mbps bitrate
+        // encoder.setFrameRate(av::Rational{15, 1});     // 15 fps (matches UPDATE_FREQ)
+        
+        // Open the encoder
+        encoder.open(codec, ec);
+        if (ec) {
+            std::cerr << "Failed to open encoder: " << ec.message() << std::endl;
+            return;
+        }
+        
+        // Add video stream
+        av::Stream ost = octx.addStream(encoder);
+        ost.setFrameRate(av::Rational{15, 1});
+        
+        // Open output file
+        octx.openOutput(filename, ec);
+        if (ec) {
+            std::cerr << "Failed to open output file: " << ec.message() << std::endl;
+            return;
+        }
+        
+        // Write header
+        octx.writeHeader(ec);
+        if (ec) {
+            std::cerr << "Failed to write header: " << ec.message() << std::endl;
+            return;
+        }
+        
+        // Create video rescaler to convert RGB24 to YUV420P
+        av::VideoRescaler rescaler;
+        
+        // Process each frame
+        for (size_t i = 0; i < captured_frames.size(); ++i) {
+            auto& rgb_frame = captured_frames[i];
+            
+            // Create YUV420P frame for encoding
+            av::VideoFrame yuv_frame(AV_PIX_FMT_YUV420P, video_width, video_height, 1);
+            
+            // Convert RGB24 to YUV420P
+            rescaler.rescale(yuv_frame, rgb_frame, ec);
+            if (ec) {
+                std::cerr << "Failed to rescale frame " << i << ": " << ec.message() << std::endl;
+                continue;
+            }
+            
+            // Set frame properties
+            yuv_frame.setTimeBase(encoder.timeBase());
+            yuv_frame.setPts(av::Timestamp{static_cast<int64_t>(frame_timestamps[i]), encoder.timeBase()});
+            yuv_frame.setStreamIndex(0);
+            
+            // Encode the frame
+            av::Packet packet = encoder.encode(yuv_frame, ec);
+            if (ec) {
+                std::cerr << "Encoding error for frame " << i << ": " << ec.message() << std::endl;
+                continue;
+            }
+            
+            if (packet) {
+                packet.setStreamIndex(0);
+                octx.writePacket(packet, ec);
+                if (ec) {
+                    std::cerr << "Failed to write packet for frame " << i << ": " << ec.message() << std::endl;
+                }
+            }
+        }
+        
+        // Flush encoder
+        while (true) {
+            av::Packet packet = encoder.encode(ec);
+            if (ec || !packet) {
+                break;
+            }
+            
+            packet.setStreamIndex(0);
+            octx.writePacket(packet, ec);
+            if (ec) {
+                std::cerr << "Failed to write flush packet: " << ec.message() << std::endl;
+                break;
+            }
+        }
+        
+        // Write trailer
+        octx.writeTrailer(ec);
+        if (ec) {
+            std::cerr << "Failed to write trailer: " << ec.message() << std::endl;
+        }
+        
+        std::cout << "Video saved successfully: " << filename << " (" << captured_frames.size() << " frames)" << std::endl;
+        
+        // Clear the captured frames
+        captured_frames.clear();
+        frame_timestamps.clear();
+        video_encoder_initialized = false;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Error saving video: " << e.what() << std::endl;
+    }
+}
 // Example function demonstrating how to access individual pixels from the frame data
 float processFrameData(int width, int height) {
     if (frame_data.size() < width * height * 4) {
@@ -484,16 +711,44 @@ int main() {
             
             if (ImGui::Checkbox("Continuous Capture", &continuous_state)) {
                 frame_mutex.lock();
+                bool was_capturing = continuous_capture;
                 continuous_capture = continuous_state;
                 frame_mutex.unlock();
+                
+                // Handle video recording start/stop
+                if (continuous_state && !was_capturing) {
+                    // Starting continuous capture - initialize video encoder
+                    initializeVideoEncoder(display_w, display_h);
+                    std::cout << "Started video recording..." << std::endl;
+                } else if (!continuous_state && was_capturing) {
+                    // Stopping continuous capture - save video
+                    std::string filename = "captured_video_" + std::to_string(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count()) + ".ts";
+                    saveVideoToFile(filename);
+                    std::cout << "Stopped video recording and saved to " << filename << std::endl;
+                }
             }
             
             // Display frame information
             frame_mutex.lock();
             size_t frame_size = frame_data.size();
             frame_mutex.unlock();
+                        // Display video recording information
+            video_mutex.lock();
+            size_t recorded_frames = captured_frames.size();
+            bool is_recording = video_encoder_initialized && continuous_capture;
+            video_mutex.unlock();
             
-            static float last_brightness = -1.0f;
+            if (is_recording) {
+                ImGui::Text("🔴 Recording: %zu frames captured", recorded_frames);
+                if (recorded_frames > 0) {
+                    auto now = std::chrono::steady_clock::now();
+                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - recording_start_time);
+                    ImGui::Text("   Duration: %ld seconds", elapsed.count());
+                }
+            } else if (recorded_frames > 0) {
+                ImGui::Text("⏹️ Ready to save: %zu frames", recorded_frames);
+            }
+                        static float last_brightness = -1.0f;
             
             if (frame_size > 0) {
                 ImGui::Text("Last captured frame:");
@@ -513,8 +768,19 @@ int main() {
                 if (ImGui::Button("Save Frame")) {
                     frame_mutex.lock();
                     saveFrameToFile("captured_frame.raw", display_w, display_h);
-                    frame_mutex.unlock();
-                }
+                    frame_mutex.unlock();                }
+                
+                // Add manual video save button
+                video_mutex.lock();
+                bool has_video_frames = captured_frames.size() > 0;
+                video_mutex.unlock();
+                
+                if (has_video_frames) {
+                    ImGui::SameLine();
+                    if (ImGui::Button("Save Video")) {
+                        std::string filename = "manual_video_" + std::to_string(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count()) + ".ts";
+                        saveVideoToFile(filename);
+                    }                }
                 
                 if (last_brightness >= 0.0f) {
                     ImGui::Text("  Average brightness: %.2f", last_brightness);
@@ -633,6 +899,11 @@ int main() {
         if (capture_frame || continuous_capture) {
             captureFrameData(display_w, display_h);
             capture_frame = false; // Reset single capture flag
+            
+            // Add frame to video buffer if continuous capture is active
+            if (continuous_capture && !frame_data.empty()) {
+                addFrameToVideo(frame_data, display_w, display_h);
+            }
         }
         frame_mutex.unlock();
 
