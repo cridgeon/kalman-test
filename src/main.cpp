@@ -8,14 +8,10 @@
 
 #include "kalman.hpp"
 #include "imgui.h"
-#include "imgui_impl_glfw.h"
-#include "imgui_impl_opengl3.h"
-#include <GLFW/glfw3.h>
-#include <GL/gl.h>
 #include <random>
 #include "pid-controller/pid.hpp"
 #include "test_track.hpp"
-#include "postprocessor.hpp"
+#include "rendering_system.hpp"
 
 using namespace std::chrono;
 #define GET_SYS_MILLIS() duration_cast<milliseconds>(system_clock::now().time_since_epoch())
@@ -182,148 +178,19 @@ void update_circle_position() {
     }
 }
 
-static void glfw_error_callback(int error, const char* description) {
-    std::cerr << "GLFW Error " << error << ": " << description << std::endl;
-}
-
 int main() {
     std::cout << "Multi-threaded Circle Animation with ImGui" << std::endl;
     
-    // Setup GLFW
-    glfwSetErrorCallback(glfw_error_callback);
-    if (!glfwInit()) {
-        std::cerr << "Failed to initialize GLFW" << std::endl;
+    // Create and initialize rendering system
+    RenderingSystem renderer(WINDOW_WIDTH, WINDOW_HEIGHT, "Kalman Test - ImGui Demo");
+    if (!renderer.initialize()) {
+        std::cerr << "Failed to initialize rendering system" << std::endl;
         return 1;
     }
-
-    // GL 3.0 + GLSL 130
-    const char* glsl_version = "#version 130";
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
-
-    // Create window with graphics context
-    GLFWwindow* window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Kalman Test - ImGui Demo", nullptr, nullptr);
-    if (window == nullptr) {
-        std::cerr << "Failed to create GLFW window" << std::endl;
-        glfwTerminate();
-        return 1;
-    }
-    glfwMakeContextCurrent(window);
-    glfwSwapInterval(1); // Enable vsync
-
-    // Load OpenGL extensions
-    if (!GLExtensionLoader::loadExtensions()) {
-        std::cerr << "Failed to load OpenGL extensions" << std::endl;
-        glfwTerminate();
-        return 1;
-    }
-
-    // Setup Dear ImGui context
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
-
-    // Setup Dear ImGui style
-    ImGui::StyleColorsDark();
-
-    // Setup Platform/Renderer backends
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init(glsl_version);
-
-    // Initialize post-processing system
-    PostProcessor postProcessor;
-    if (!postProcessor.initialize(WINDOW_WIDTH, WINDOW_HEIGHT)) {
-        std::cerr << "Failed to initialize post-processor" << std::endl;
-        return 1;
-    }
-
-    // Load post-processing shaders
-    postProcessor.addEffect("passthrough", R"(
-        #version 130
-        in vec2 TexCoords;
-        out vec4 color;
-        uniform sampler2D screenTexture;
-        void main() {
-            color = texture2D(screenTexture, TexCoords);
-        }
-    )");
-
-    // Enable passthrough by default
-    postProcessor.setEffectEnabled("passthrough", true);
-
-    postProcessor.addEffect("grayscale", R"(
-        #version 130
-        in vec2 TexCoords;
-        out vec4 color;
-        uniform sampler2D screenTexture;
-        void main() {
-            vec3 texColor = texture2D(screenTexture, TexCoords).rgb;
-            float gray = dot(texColor, vec3(0.299, 0.587, 0.114));
-            color = vec4(vec3(gray), 1.0);
-        }
-    )");
-
-    postProcessor.addEffect("invert", R"(
-        #version 130
-        in vec2 TexCoords;
-        out vec4 color;
-        uniform sampler2D screenTexture;
-        void main() {
-            vec3 texColor = texture2D(screenTexture, TexCoords).rgb;
-            color = vec4(1.0 - texColor, 1.0);
-        }
-    )");
-
-    postProcessor.addEffect("blur", R"(
-        #version 130
-        in vec2 TexCoords;
-        out vec4 color;
-        uniform sampler2D screenTexture;
-        uniform vec2 resolution;
-        void main() {
-            vec2 texelSize = 1.0 / resolution;
-            vec3 result = vec3(0.0);
-            for(int x = -1; x <= 1; ++x) {
-                for(int y = -1; y <= 1; ++y) {
-                    vec2 offset = vec2(float(x), float(y)) * texelSize;
-                    result += texture2D(screenTexture, TexCoords + offset).rgb;
-                }
-            }
-            result /= 9.0;
-            color = vec4(result, 1.0);
-        }
-    )");
-
-    postProcessor.addEffect("edge_detect", R"(
-        #version 130
-        in vec2 TexCoords;
-        out vec4 color;
-        uniform sampler2D screenTexture;
-        uniform vec2 resolution;
-        void main() {
-            vec2 texelSize = 1.0 / resolution;
-            vec3 top = texture2D(screenTexture, TexCoords + vec2(0.0, texelSize.y)).rgb;
-            vec3 bottom = texture2D(screenTexture, TexCoords + vec2(0.0, -texelSize.y)).rgb;
-            vec3 left = texture2D(screenTexture, TexCoords + vec2(-texelSize.x, 0.0)).rgb;
-            vec3 right = texture2D(screenTexture, TexCoords + vec2(texelSize.x, 0.0)).rgb;
-            vec3 topLeft = texture2D(screenTexture, TexCoords + vec2(-texelSize.x, texelSize.y)).rgb;
-            vec3 topRight = texture2D(screenTexture, TexCoords + vec2(texelSize.x, texelSize.y)).rgb;
-            vec3 bottomLeft = texture2D(screenTexture, TexCoords + vec2(-texelSize.x, -texelSize.y)).rgb;
-            vec3 bottomRight = texture2D(screenTexture, TexCoords + vec2(texelSize.x, -texelSize.y)).rgb;
-            
-            vec3 sx = (topRight + 2.0 * right + bottomRight) - (topLeft + 2.0 * left + bottomLeft);
-            vec3 sy = (topLeft + 2.0 * top + topRight) - (bottomLeft + 2.0 * bottom + bottomRight);
-            vec3 sobel = sqrt(sx * sx + sy * sy);
-            
-            color = vec4(sobel, 1.0);
-        }
-    )");
 
     // Our state
     bool show_demo_window = false;
     bool show_controls = true;
-    ImVec4 clear_color = ImVec4(0.1f, 0.1f, 0.15f, 1.00f);
     ImVec4 real_color = ImVec4(0.2f, 0.8f, 0.2f, 1.0f);
     ImVec4 measured_color = ImVec4(0.8f, 0.2f, 0.2f, 1.0f);
     ImVec4 reported_color = ImVec4(0.8f, 0.8f, 0.2f, 1.0f);
@@ -390,28 +257,13 @@ int main() {
     std::thread update_thread(update_circle_position);
 
     // Main loop
-    while (!glfwWindowShouldClose(window)) {
-        // Poll and handle events
-        glfwPollEvents();
-
-        // Check for window resize
-        int display_w, display_h;
-        glfwGetFramebufferSize(window, &display_w, &display_h);
-        if (display_w != postProcessor.getWidth() || display_h != postProcessor.getHeight()) {
-            postProcessor.resize(display_w, display_h);
-        }
-
-        // Begin rendering to framebuffer
-        postProcessor.beginRender();
+    while (renderer.shouldContinue()) {
+        // Begin frame
+        renderer.beginFrame();
 
         // Real circle position is now updated by the test track in update_circle_position thread
         // No longer using mouse position
         
-        // Start the Dear ImGui frame
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
-
         // Get circle position for rendering (thread-safe)
         float real_x, real_y, real_r, 
             measured_x, measured_y, measured_r, 
@@ -433,17 +285,10 @@ int main() {
         g_state_mutex.unlock();
 
         // Create a fullscreen ImGui window for drawing
-        ImGui::SetNextWindowPos(ImVec2(0, 0));
-        ImGui::SetNextWindowSize(io.DisplaySize);
-        ImGui::Begin("Canvas", nullptr, 
-                     ImGuiWindowFlags_NoDecoration | 
-                     ImGuiWindowFlags_NoMove | 
-                     ImGuiWindowFlags_NoResize | 
-                     ImGuiWindowFlags_NoSavedSettings |
-                     ImGuiWindowFlags_NoBringToFrontOnFocus);
+        renderer.beginCanvas();
         
         // Draw the circle
-        ImDrawList* draw_list = ImGui::GetWindowDrawList();
+        ImDrawList* draw_list = renderer.getDrawList();
         ImU32 col = ImGui::GetColorU32(real_color);
         draw_list->AddCircle(ImVec2((real_x + 1.0)/2.0 * WINDOW_WIDTH, (real_y + 1.0)/2.0 * WINDOW_HEIGHT), real_r, col, 32);
         col = ImGui::GetColorU32(measured_color);
@@ -455,10 +300,11 @@ int main() {
         col = ImGui::GetColorU32(smoothed_color);
         draw_list->AddCircle(ImVec2((smoothed_x + 1.0)/2.0 * WINDOW_WIDTH, (smoothed_y + 1.0)/2.0 * WINDOW_HEIGHT), smoothed_r, col, 32);
         
-        ImGui::End();
+        renderer.endCanvas();
 
         // Show controls window
         if (show_controls) {
+            ImGuiIO& io = renderer.getIO();
             ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
             ImGui::SetNextWindowSize(ImVec2(350, 0), ImGuiCond_FirstUseEver);
             ImGui::Begin("Controls", &show_controls);
@@ -592,6 +438,7 @@ int main() {
             ImGui::Text("Available Shader Effects:");
             ImGui::Separator();
             
+            PostProcessor& postProcessor = renderer.getPostProcessor();
             std::vector<std::string> effects = postProcessor.getEffectNames();
             for (const std::string& effect : effects) {
                 bool enabled = postProcessor.isEffectEnabled(effect);
@@ -603,32 +450,14 @@ int main() {
             ImGui::End();
         }
 
-        // Rendering - render ImGui to the framebuffer first
-        ImGui::Render();
-        
-        // Clear the framebuffer and render ImGui to it
-        glClearColor(clear_color.x * clear_color.w, clear_color.y * clear_color.w, 
-                     clear_color.z * clear_color.w, clear_color.w);
-        glClear(GL_COLOR_BUFFER_BIT);
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
-        // Apply post-processing effects and render to screen
-        postProcessor.endRender();
-
-        glfwSwapBuffers(window);
+        // End frame
+        renderer.endFrame();
     }
 
     // Signal the update thread to stop and wait for it
     g_running = false;
     update_thread.join();
 
-    // Cleanup
-    ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
-    ImGui::DestroyContext();
-
-    glfwDestroyWindow(window);
-    glfwTerminate();
-
+    // Cleanup is handled automatically by RenderingSystem destructor
     return 0;
 }
