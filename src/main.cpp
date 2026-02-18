@@ -10,12 +10,13 @@
 #include <random>
 #include "pid-controller/pid.hpp"
 #include "test_track.hpp"
-#include "rendering_system.hpp"
+
+#include "gl-basic-renderer/src/gl-basic.hpp"
+
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 
-#include "shader/all.hpp"
 
 using namespace std::chrono;
 #define GET_SYS_MILLIS() duration_cast<milliseconds>(system_clock::now().time_since_epoch())
@@ -23,7 +24,7 @@ using namespace std::chrono;
 static const int WINDOW_WIDTH = 1280;
 static const int WINDOW_HEIGHT = 720;
 static const float UPDATE_FREQ = 150.0f;
-static const float MEAS_NOISE_STDDEV = 0.05f;
+static const float MEAS_NOISE_STDDEV = 0.01f;
 static const milliseconds delay_time(500);
 
 // Shared state for circle position
@@ -212,7 +213,7 @@ int main() {
     std::cout << "Multi-threaded Circle Animation with ImGui" << std::endl;
     
     // Get singleton instance and initialize rendering system
-    RenderingSystem& renderer = RenderingSystem::getInstance();
+    cridgeon::RenderingSystem& renderer = cridgeon::RenderingSystem::getInstance();
     if (!renderer.initialize(WINDOW_WIDTH, WINDOW_HEIGHT, "Kalman Test - ImGui Demo")) {
         std::cerr << "Failed to initialize rendering system" << std::endl;
         return 1;
@@ -327,7 +328,7 @@ int main() {
         
         // Convert positions from current coordinate system to normalized coordinates [-1, 1]
         // Current system: positions are in [-1, 1] range already
-        Render::polygon(
+        cridgeon::Render::polygon(
             {
             WINDOW_WIDTH /4, WINDOW_HEIGHT /4,
             WINDOW_WIDTH /4 + 60, WINDOW_HEIGHT /4,
@@ -342,7 +343,7 @@ int main() {
             1.0, 1.0, 1.0, 0.2
         );
 
-        Render::polygonFilled(
+        cridgeon::Render::polygonFilled(
             {
                 WINDOW_WIDTH /4 - 100, WINDOW_HEIGHT /4 - 100,
                 WINDOW_WIDTH /4 + 40, WINDOW_HEIGHT /4 - 100,
@@ -352,9 +353,9 @@ int main() {
             0.8, 1.0, 1.0, 0.1
         );
 
-        Render::line(WINDOW_WIDTH / 4, 0, WINDOW_WIDTH / 4, WINDOW_HEIGHT, 0.3, 0.3, 0.3, 0.5);
+        cridgeon::Render::line(WINDOW_WIDTH / 4, 0, WINDOW_WIDTH / 4, WINDOW_HEIGHT, 0.3, 0.3, 0.3, 0.5);
 
-        Render::lines(
+        cridgeon::Render::lines(
             {
                 WINDOW_WIDTH * 3 /4, 0, WINDOW_WIDTH * 3 /4, WINDOW_HEIGHT,
                 0, WINDOW_HEIGHT * 3 /4, WINDOW_WIDTH, WINDOW_HEIGHT * 3 /4
@@ -362,12 +363,12 @@ int main() {
             1.0, 1.0, 1.0, 0.2
         );
 
-        Render::circle(real_x, real_y, real_r, real_color.x, real_color.y, real_color.z, real_color.w);
-        Render::circle(measured_x, measured_y, measured_r, measured_color.x, measured_color.y, measured_color.z, measured_color.w);
-        Render::circle(g_reported_state.x, g_reported_state.y, g_reported_state.radius, reported_color.x, reported_color.y, reported_color.z, reported_color.w);
-        Render::circle(estimated_x, estimated_y, estimated_r, estimated_color.x, estimated_color.y, estimated_color.z, estimated_color.w);
-        Render::circle(smoothed_x, smoothed_y, smoothed_r, smoothed_color.x, smoothed_color.y, smoothed_color.z, smoothed_color.w);
-        Render::circle(WINDOW_WIDTH / 4, WINDOW_HEIGHT / 4, 10, 0.3, 0.2, 0.3, 0.5);
+        cridgeon::Render::circle(real_x, real_y, real_r, real_color.x, real_color.y, real_color.z, real_color.w);
+        cridgeon::Render::circle(measured_x, measured_y, measured_r, measured_color.x, measured_color.y, measured_color.z, measured_color.w);
+        cridgeon::Render::circle(g_reported_state.x, g_reported_state.y, g_reported_state.radius, reported_color.x, reported_color.y, reported_color.z, reported_color.w);
+        cridgeon::Render::circle(estimated_x, estimated_y, estimated_r, estimated_color.x, estimated_color.y, estimated_color.z, estimated_color.w);
+        cridgeon::Render::circle(smoothed_x, smoothed_y, smoothed_r, smoothed_color.x, smoothed_color.y, smoothed_color.z, smoothed_color.w);
+        cridgeon::Render::circle(WINDOW_WIDTH / 4, WINDOW_HEIGHT / 4, 10, 0.3, 0.2, 0.3, 0.5);
 
         // renderer.endCanvas();
 
@@ -529,7 +530,7 @@ int main() {
     }
 
     // Signal the update thread to stop and wait for it
-    Render::destroyAllShaders();
+    cridgeon::Render::destroyAllShaders();
     g_running = false;
     update_thread.join();
     cleanupImGui();

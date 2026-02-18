@@ -17,13 +17,6 @@ set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -g -O0")
 # Include Eigen header-only library
 include_directories(${CMAKE_SOURCE_DIR}/eigen)
 
-# Add GLFW
-set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_WAYLAND OFF CACHE BOOL "" FORCE)
-add_subdirectory(glfw)
-
 # Add ImGui library
 set(IMGUI_DIR ${CMAKE_SOURCE_DIR}/imgui)
 add_library(imgui
@@ -63,6 +56,8 @@ target_include_directories(kalman-lib PUBLIC
 # Add PID Controller subdirectory
 add_subdirectory(pid-controller)
 
+add_subdirectory(gl-basic-renderer)
+
 # Add main executable
 file(GLOB MAIN_SOURCES
     "src/*.cpp"
@@ -72,13 +67,14 @@ file(GLOB MAIN_SOURCES
 add_executable(main ${MAIN_SOURCES})
 
 # Link kalman library to main executable
-target_link_libraries(main kalman-lib imgui glfw OpenGL::GL ${CMAKE_DL_LIBS})
+target_link_libraries(main kalman-lib cridgeon-gl-basic imgui OpenGL::GL ${CMAKE_DL_LIBS})
 
 # Include directories for main
 target_include_directories(main PRIVATE
     ${CMAKE_SOURCE_DIR}/kalman-cpp
     ${CMAKE_SOURCE_DIR}/eigen
-    ${CMAKE_SOURCE_DIR}/glfw/deps
+    ${CMAKE_SOURCE_DIR}/gl-basic-renderer/src
+    ${CMAKE_SOURCE_DIR}/gl-basic-renderer/glfw/deps
     ${IMGUI_DIR}
     ${IMGUI_DIR}/backends
 )

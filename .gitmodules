@@ -4,3 +4,6 @@
 [submodule "kalman-cpp"]
 	path = kalman-cpp
 	url = https://github.com/cridgeon/kalman-cpp.git
+[submodule "gl-basic-renderer"]
+	path = gl-basic-renderer
+	url = https://github.com/cridgeon/gl-basic-renderer.git
