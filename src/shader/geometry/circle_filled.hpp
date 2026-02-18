@@ -7,28 +7,28 @@
 
 namespace Render {
 
-    static Shader s;
+    static Shader circleFilledShader;
 
     inline void circleFilled(float x, float y, float radius, float r, float g, float b, float a) {
-        if (!s.isValid()) {
-            s.loadFromFile("resources/shaders/geometry/default.vert", "resources/shaders/geometry/circle_filled.frag");
-            if (!s.isValid()) {
+        if (!circleFilledShader.isValid()) {
+            circleFilledShader.loadFromFile("resources/shaders/geometry/default.vert", "resources/shaders/geometry/circle_filled.frag");
+            if (!circleFilledShader.isValid()) {
                 throw std::runtime_error("Failed to load circle_filled shader");
             }
         }
-        s.use();
+        circleFilledShader.use();
         float w = RenderingSystem::getInstance().getWindowWidth();
         float h = RenderingSystem::getInstance().getWindowHeight();
-        glUniform2f(s.getUniformLocation("resolution"), w, h);
-        glUniform2f(s.getUniformLocation("position"), x, y);
-        glUniform1f(s.getUniformLocation("radius"), radius);
-        glUniform4f(s.getUniformLocation("color"), r, g, b, a);
+        glUniform2f(circleFilledShader.getUniformLocation("resolution"), w, h);
+        glUniform2f(circleFilledShader.getUniformLocation("position"), x, y);
+        glUniform1f(circleFilledShader.getUniformLocation("radius"), radius);
+        glUniform4f(circleFilledShader.getUniformLocation("color"), r, g, b, a);
 
         ShaderUtility::drawFullScreenQuad();
     }
 
     inline void _destroyCircleFilled() {
-        s.destroy();
+        circleFilledShader.destroy();
     }
 }
 

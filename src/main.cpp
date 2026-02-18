@@ -327,12 +327,48 @@ int main() {
         
         // Convert positions from current coordinate system to normalized coordinates [-1, 1]
         // Current system: positions are in [-1, 1] range already
-        Render::circleFilled(real_x, real_y, real_r, real_color.x, real_color.y, real_color.z, real_color.w);
-        Render::circleFilled(measured_x, measured_y, measured_r, measured_color.x, measured_color.y, measured_color.z, measured_color.w);
-        Render::circleFilled(g_reported_state.x, g_reported_state.y, g_reported_state.radius, reported_color.x, reported_color.y, reported_color.z, reported_color.w);
-        Render::circleFilled(estimated_x, estimated_y, estimated_r, estimated_color.x, estimated_color.y, estimated_color.z, estimated_color.w);
-        Render::circleFilled(smoothed_x, smoothed_y, smoothed_r, smoothed_color.x, smoothed_color.y, smoothed_color.z, smoothed_color.w);
-        Render::circleFilled(WINDOW_WIDTH / 4, WINDOW_HEIGHT / 4, 10, 0.3, 0.2, 0.3, 0.5);
+        Render::polygon(
+            {
+            WINDOW_WIDTH /4, WINDOW_HEIGHT /4,
+            WINDOW_WIDTH /4 + 60, WINDOW_HEIGHT /4,
+            WINDOW_WIDTH /4 + 80, WINDOW_HEIGHT /4 + 30,
+            WINDOW_WIDTH /4 + 40, WINDOW_HEIGHT /4 + 20,
+            WINDOW_WIDTH /4 + 60, WINDOW_HEIGHT /4 + 60,
+            WINDOW_WIDTH /4 + 20, WINDOW_HEIGHT /4 + 80,
+            WINDOW_WIDTH /4 - 20, WINDOW_HEIGHT /4 + 60,
+            WINDOW_WIDTH /4, WINDOW_HEIGHT /4 + 40,
+            WINDOW_WIDTH /4 - 30, WINDOW_HEIGHT /4 + 20
+            },
+            1.0, 1.0, 1.0, 0.2
+        );
+
+        Render::polygonFilled(
+            {
+                WINDOW_WIDTH /4 - 100, WINDOW_HEIGHT /4 - 100,
+                WINDOW_WIDTH /4 + 40, WINDOW_HEIGHT /4 - 100,
+                WINDOW_WIDTH /4 + 40, WINDOW_HEIGHT /4 + 40,
+                WINDOW_WIDTH /4 - 100, WINDOW_HEIGHT /4 + 40
+            },
+            0.8, 1.0, 1.0, 0.1
+        );
+
+        Render::line(WINDOW_WIDTH / 4, 0, WINDOW_WIDTH / 4, WINDOW_HEIGHT, 0.3, 0.3, 0.3, 0.5);
+
+        Render::lines(
+            {
+                WINDOW_WIDTH * 3 /4, 0, WINDOW_WIDTH * 3 /4, WINDOW_HEIGHT,
+                0, WINDOW_HEIGHT * 3 /4, WINDOW_WIDTH, WINDOW_HEIGHT * 3 /4
+            },
+            1.0, 1.0, 1.0, 0.2
+        );
+
+        Render::circle(real_x, real_y, real_r, real_color.x, real_color.y, real_color.z, real_color.w);
+        Render::circle(measured_x, measured_y, measured_r, measured_color.x, measured_color.y, measured_color.z, measured_color.w);
+        Render::circle(g_reported_state.x, g_reported_state.y, g_reported_state.radius, reported_color.x, reported_color.y, reported_color.z, reported_color.w);
+        Render::circle(estimated_x, estimated_y, estimated_r, estimated_color.x, estimated_color.y, estimated_color.z, estimated_color.w);
+        Render::circle(smoothed_x, smoothed_y, smoothed_r, smoothed_color.x, smoothed_color.y, smoothed_color.z, smoothed_color.w);
+        Render::circle(WINDOW_WIDTH / 4, WINDOW_HEIGHT / 4, 10, 0.3, 0.2, 0.3, 0.5);
+
         // renderer.endCanvas();
 
         // Show controls window
