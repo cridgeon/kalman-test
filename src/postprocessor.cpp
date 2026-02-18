@@ -3,16 +3,17 @@
 #include <algorithm>
 #include <fstream>
 #include <sstream>
+#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
 PostProcessor::PostProcessor() : quadVAO(0), quadVBO(0), screenWidth(0), screenHeight(0) {}
 
 PostProcessor::~PostProcessor() {
     if (quadVBO != 0) {
-        GLExtensionLoader::glDeleteBuffers(1, &quadVBO);
+        glDeleteBuffers(1, &quadVBO);
     }
     if (quadVAO != 0) {
-        GLExtensionLoader::glDeleteVertexArrays(1, &quadVAO);
+        glDeleteVertexArrays(1, &quadVAO);
     }
 }
 
@@ -124,13 +125,13 @@ void PostProcessor::endRender() {
         effect->shader.use();
         
         // Bind the texture
-        GLExtensionLoader::glActiveTexture(GL_TEXTURE0);
+        glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, currentTexture);
-        effect->shader.setInt("screenTexture", 0);
+        glUniform1i(effect->shader.getUniformLocation("screenTexture"), 0);
         
         // Set common uniforms
-        effect->shader.setVec2("resolution", static_cast<float>(screenWidth), static_cast<float>(screenHeight));
-        effect->shader.setFloat("time", static_cast<float>(glfwGetTime()));
+        glUniform2f(effect->shader.getUniformLocation("resolution"), static_cast<float>(screenWidth), static_cast<float>(screenHeight));
+        glUniform1f(effect->shader.getUniformLocation("time"), static_cast<float>(glfwGetTime()));
 
         // Render full-screen quad
         renderQuad();
@@ -144,9 +145,9 @@ void PostProcessor::endRender() {
         for (const auto& effect : effects) {
             if (effect->name == "passthrough") {
                 effect->shader.use();
-                GLExtensionLoader::glActiveTexture(GL_TEXTURE0);
+                glActiveTexture(GL_TEXTURE0);
                 glBindTexture(GL_TEXTURE_2D, currentTexture);
-                effect->shader.setInt("screenTexture", 0);
+                glUniform1i(effect->shader.getUniformLocation("screenTexture"), 0);
                 renderQuad();
                 break;
             }
@@ -170,7 +171,7 @@ void PostProcessor::setEffectFloat(const std::string& effectName, const std::str
     Effect* effect = findEffect(effectName);
     if (effect && effect->shader.isValid()) {
         effect->shader.use();
-        effect->shader.setFloat(uniformName, value);
+        glUniform1f(effect->shader.getUniformLocation(uniformName), value);
     }
 }
 
@@ -178,7 +179,7 @@ void PostProcessor::setEffectVec2(const std::string& effectName, const std::stri
     Effect* effect = findEffect(effectName);
     if (effect && effect->shader.isValid()) {
         effect->shader.use();
-        effect->shader.setVec2(uniformName, x, y);
+        glUniform2f(effect->shader.getUniformLocation(uniformName), x, y);
     }
 }
 
@@ -186,7 +187,7 @@ void PostProcessor::setEffectVec3(const std::string& effectName, const std::stri
     Effect* effect = findEffect(effectName);
     if (effect && effect->shader.isValid()) {
         effect->shader.use();
-        effect->shader.setVec3(uniformName, x, y, z);
+        glUniform3f(effect->shader.getUniformLocation(uniformName), x, y, z);
     }
 }
 
@@ -194,7 +195,7 @@ void PostProcessor::setEffectVec4(const std::string& effectName, const std::stri
     Effect* effect = findEffect(effectName);
     if (effect && effect->shader.isValid()) {
         effect->shader.use();
-        effect->shader.setVec4(uniformName, x, y, z, w);
+        glUniform4f(effect->shader.getUniformLocation(uniformName), x, y, z, w);
     }
 }
 
@@ -210,22 +211,22 @@ void PostProcessor::setupQuad() {
          1.0f,  1.0f,  1.0f, 1.0f
     };
 
-    GLExtensionLoader::glGenVertexArrays(1, &quadVAO);
-    GLExtensionLoader::glGenBuffers(1, &quadVBO);
-    GLExtensionLoader::glBindVertexArray(quadVAO);
-    GLExtensionLoader::glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
-    GLExtensionLoader::glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), &quadVertices, GL_STATIC_DRAW);
-    GLExtensionLoader::glEnableVertexAttribArray(0);
-    GLExtensionLoader::glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
-    GLExtensionLoader::glEnableVertexAttribArray(1);
-    GLExtensionLoader::glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
-    GLExtensionLoader::glBindVertexArray(0);
+    glGenVertexArrays(1, &quadVAO);
+    glGenBuffers(1, &quadVBO);
+    glBindVertexArray(quadVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), &quadVertices, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+    glBindVertexArray(0);
 }
 
 void PostProcessor::renderQuad() {
-    GLExtensionLoader::glBindVertexArray(quadVAO);
+    glBindVertexArray(quadVAO);
     glDrawArrays(GL_TRIANGLES, 0, 6);
-    GLExtensionLoader::glBindVertexArray(0);
+    glBindVertexArray(0);
 }
 
 std::string PostProcessor::getDefaultVertexShader() const {

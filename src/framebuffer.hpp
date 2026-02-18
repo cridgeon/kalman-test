@@ -1,6 +1,6 @@
 #pragma once
 
-#include "gl_extensions.hpp"
+#include <glad/gl.h>
 
 class Framebuffer {
 public:

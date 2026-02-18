@@ -86,9 +86,9 @@ bool CircleRenderer::initialize(int window_width, int window_height) {
     setupQuad();
     
     // Get uniform locations
-    u_resolution_ = GLExtensionLoader::glGetUniformLocation(shader_program_, "u_resolution");
-    u_circle_count_ = GLExtensionLoader::glGetUniformLocation(shader_program_, "u_circle_count");
-    u_circles_ = GLExtensionLoader::glGetUniformLocation(shader_program_, "u_circles");
+    u_resolution_ = glGetUniformLocation(shader_program_, "u_resolution");
+    u_circle_count_ = glGetUniformLocation(shader_program_, "u_circle_count");
+    u_circles_ = glGetUniformLocation(shader_program_, "u_circles");
     
     initialized_ = true;
     return true;
@@ -107,70 +107,70 @@ void CircleRenderer::setupQuad() {
         -1.0f,  1.0f
     };
     
-    GLExtensionLoader::glGenVertexArrays(1, &vao_);
-    GLExtensionLoader::glGenBuffers(1, &vbo_);
+    glGenVertexArrays(1, &vao_);
+    glGenBuffers(1, &vbo_);
     
-    GLExtensionLoader::glBindVertexArray(vao_);
-    GLExtensionLoader::glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    GLExtensionLoader::glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    glBindVertexArray(vao_);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
     
     // Position attribute
-    GLExtensionLoader::glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
-    GLExtensionLoader::glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
     
-    GLExtensionLoader::glBindVertexArray(0);
+    glBindVertexArray(0);
 }
 
 bool CircleRenderer::createShaders() {
     // Create and compile vertex shader
-    GLuint vertex_shader = GLExtensionLoader::glCreateShader(GL_VERTEX_SHADER);
-    GLExtensionLoader::glShaderSource(vertex_shader, 1, &vertex_shader_source, NULL);
-    GLExtensionLoader::glCompileShader(vertex_shader);
+    GLuint vertex_shader = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vertex_shader, 1, &vertex_shader_source, NULL);
+    glCompileShader(vertex_shader);
     
     // Check vertex shader compilation
     GLint success;
     GLchar info_log[512];
-    GLExtensionLoader::glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &success);
+    glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &success);
     if (!success) {
-        GLExtensionLoader::glGetShaderInfoLog(vertex_shader, 512, NULL, info_log);
+        glGetShaderInfoLog(vertex_shader, 512, NULL, info_log);
         std::cerr << "Vertex shader compilation failed: " << info_log << std::endl;
         return false;
     }
     
     // Create and compile fragment shader
-    GLuint fragment_shader = GLExtensionLoader::glCreateShader(GL_FRAGMENT_SHADER);
-    GLExtensionLoader::glShaderSource(fragment_shader, 1, &fragment_shader_source, NULL);
-    GLExtensionLoader::glCompileShader(fragment_shader);
+    GLuint fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fragment_shader, 1, &fragment_shader_source, NULL);
+    glCompileShader(fragment_shader);
     
     // Check fragment shader compilation
-    GLExtensionLoader::glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &success);
+    glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &success);
     if (!success) {
-        GLExtensionLoader::glGetShaderInfoLog(fragment_shader, 512, NULL, info_log);
+        glGetShaderInfoLog(fragment_shader, 512, NULL, info_log);
         std::cerr << "Fragment shader compilation failed: " << info_log << std::endl;
         return false;
     }
     
     // Create shader program
-    shader_program_ = GLExtensionLoader::glCreateProgram();
-    GLExtensionLoader::glAttachShader(shader_program_, vertex_shader);
-    GLExtensionLoader::glAttachShader(shader_program_, fragment_shader);
+    shader_program_ = glCreateProgram();
+    glAttachShader(shader_program_, vertex_shader);
+    glAttachShader(shader_program_, fragment_shader);
     
     // Bind attribute location
-    GLExtensionLoader::glBindAttribLocation(shader_program_, 0, "position");
+    glBindAttribLocation(shader_program_, 0, "position");
     
-    GLExtensionLoader::glLinkProgram(shader_program_);
+    glLinkProgram(shader_program_);
     
     // Check program linking
-    GLExtensionLoader::glGetProgramiv(shader_program_, GL_LINK_STATUS, &success);
+    glGetProgramiv(shader_program_, GL_LINK_STATUS, &success);
     if (!success) {
-        GLExtensionLoader::glGetProgramInfoLog(shader_program_, 512, NULL, info_log);
+        glGetProgramInfoLog(shader_program_, 512, NULL, info_log);
         std::cerr << "Shader program linking failed: " << info_log << std::endl;
         return false;
     }
     
     // Clean up individual shaders
-    GLExtensionLoader::glDeleteShader(vertex_shader);
-    GLExtensionLoader::glDeleteShader(fragment_shader);
+    glDeleteShader(vertex_shader);
+    glDeleteShader(fragment_shader);
     
     return true;
 }
@@ -211,11 +211,11 @@ void CircleRenderer::render() {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     
-    GLExtensionLoader::glUseProgram(shader_program_);
+    glUseProgram(shader_program_);
     
     // Set uniforms
-    GLExtensionLoader::glUniform2f(u_resolution_, (float)window_width_, (float)window_height_);
-    GLExtensionLoader::glUniform1i(u_circle_count_, (int)circles_.size());
+    glUniform2f(u_resolution_, (float)window_width_, (float)window_height_);
+    glUniform1i(u_circle_count_, (int)circles_.size());
     
     // Pack circle data into float array
     float circle_data[MAX_CIRCLES * 6]; // 6 floats per circle (x, y, radius, r, g, b)
@@ -229,27 +229,27 @@ void CircleRenderer::render() {
         circle_data[base + 5] = circles_[i].b;
     }
     
-    GLExtensionLoader::glUniform1fv(u_circles_, circles_.size() * 6, circle_data);
+    glUniform1fv(u_circles_, circles_.size() * 6, circle_data);
     
     // Render fullscreen quad
-    GLExtensionLoader::glBindVertexArray(vao_);
+    glBindVertexArray(vao_);
     glDrawArrays(GL_TRIANGLES, 0, 6);
-    GLExtensionLoader::glBindVertexArray(0);
+    glBindVertexArray(0);
     
     glDisable(GL_BLEND);
 }
 
 void CircleRenderer::cleanup() {
     if (vao_) {
-        GLExtensionLoader::glDeleteVertexArrays(1, &vao_);
+        glDeleteVertexArrays(1, &vao_);
         vao_ = 0;
     }
     if (vbo_) {
-        GLExtensionLoader::glDeleteBuffers(1, &vbo_);
+        glDeleteBuffers(1, &vbo_);
         vbo_ = 0;
     }
     if (shader_program_) {
-        GLExtensionLoader::glDeleteProgram(shader_program_);
+        glDeleteProgram(shader_program_);
         shader_program_ = 0;
     }
     initialized_ = false;

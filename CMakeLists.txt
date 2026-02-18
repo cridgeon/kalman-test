@@ -61,7 +61,6 @@ add_executable(main
     src/shader.cpp
     src/framebuffer.cpp
     src/postprocessor.cpp
-    src/gl_extensions.cpp
     pid-controller/pid.cpp
 )
 
@@ -72,6 +71,7 @@ target_link_libraries(main kalman-lib imgui glfw OpenGL::GL ${CMAKE_DL_LIBS})
 target_include_directories(main PRIVATE
     ${CMAKE_SOURCE_DIR}/kalman-cpp
     ${CMAKE_SOURCE_DIR}/eigen
+    ${CMAKE_SOURCE_DIR}/glfw/deps
     ${IMGUI_DIR}
     ${IMGUI_DIR}/backends
 )

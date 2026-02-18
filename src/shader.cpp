@@ -7,7 +7,7 @@ Shader::Shader() : programID(0) {}
 
 Shader::~Shader() {
     if (programID != 0) {
-        GLExtensionLoader::glDeleteProgram(programID);
+        glDeleteProgram(programID);
     }
 }
 
@@ -18,7 +18,7 @@ Shader::Shader(Shader&& other) noexcept : programID(other.programID), uniformLoc
 Shader& Shader::operator=(Shader&& other) noexcept {
     if (this != &other) {
         if (programID != 0) {
-            GLExtensionLoader::glDeleteProgram(programID);
+            glDeleteProgram(programID);
         }
         programID = other.programID;
         uniformLocationCache = std::move(other.uniformLocationCache);
@@ -33,14 +33,14 @@ bool Shader::loadFromSource(const std::string& vertexSource, const std::string& 
 
     unsigned int fragmentShader = compileShader(fragmentSource, GL_FRAGMENT_SHADER);
     if (fragmentShader == 0) {
-        GLExtensionLoader::glDeleteShader(vertexShader);
+        glDeleteShader(vertexShader);
         return false;
     }
 
     programID = createProgram(vertexShader, fragmentShader);
     
-    GLExtensionLoader::glDeleteShader(vertexShader);
-    GLExtensionLoader::glDeleteShader(fragmentShader);
+    glDeleteShader(vertexShader);
+    glDeleteShader(fragmentShader);
     
     return programID != 0;
 }
@@ -58,46 +58,32 @@ bool Shader::loadFromFile(const std::string& vertexPath, const std::string& frag
 
 void Shader::use() const {
     if (programID != 0) {
-        GLExtensionLoader::glUseProgram(programID);
+        glUseProgram(programID);
     }
 }
 
-void Shader::setFloat(const std::string& name, float value) const {
-    GLExtensionLoader::glUniform1f(getUniformLocation(name), value);
+void Shader::render() {
+    // Render fullscreen quad
+    glBindVertexArray(vao_);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    glBindVertexArray(0);
+    
+    glDisable(GL_BLEND);
 }
 
-void Shader::setInt(const std::string& name, int value) const {
-    GLExtensionLoader::glUniform1i(getUniformLocation(name), value);
-}
-
-void Shader::setVec2(const std::string& name, float x, float y) const {
-    GLExtensionLoader::glUniform2f(getUniformLocation(name), x, y);
-}
-
-void Shader::setVec3(const std::string& name, float x, float y, float z) const {
-    GLExtensionLoader::glUniform3f(getUniformLocation(name), x, y, z);
-}
-
-void Shader::setVec4(const std::string& name, float x, float y, float z, float w) const {
-    GLExtensionLoader::glUniform4f(getUniformLocation(name), x, y, z, w);
-}
-
-void Shader::setMat4(const std::string& name, const float* value) const {
-    GLExtensionLoader::glUniformMatrix4fv(getUniformLocation(name), 1, GL_FALSE, value);
-}
-
-unsigned int Shader::compileShader(const std::string& source, unsigned int type) {
-    unsigned int shader = GLExtensionLoader::glCreateShader(type);
+unsigned int Shader::compileShader(const std::string &source, unsigned int type)
+{
+    unsigned int shader = glCreateShader(type);
     const char* src = source.c_str();
-    GLExtensionLoader::glShaderSource(shader, 1, &src, nullptr);
-    GLExtensionLoader::glCompileShader(shader);
+    glShaderSource(shader, 1, &src, nullptr);
+    glCompileShader(shader);
     
     checkCompileErrors(shader, type == GL_VERTEX_SHADER ? Type::VERTEX : Type::FRAGMENT);
     
     int success;
-    GLExtensionLoader::glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
     if (!success) {
-        GLExtensionLoader::glDeleteShader(shader);
+        glDeleteShader(shader);
         return 0;
     }
     
@@ -105,17 +91,17 @@ unsigned int Shader::compileShader(const std::string& source, unsigned int type)
 }
 
 unsigned int Shader::createProgram(unsigned int vertexShader, unsigned int fragmentShader) {
-    unsigned int program = GLExtensionLoader::glCreateProgram();
-    GLExtensionLoader::glAttachShader(program, vertexShader);
-    GLExtensionLoader::glAttachShader(program, fragmentShader);
-    GLExtensionLoader::glLinkProgram(program);
+    unsigned int program = glCreateProgram();
+    glAttachShader(program, vertexShader);
+    glAttachShader(program, fragmentShader);
+    glLinkProgram(program);
     
     checkCompileErrors(program, Type::PROGRAM);
     
     int success;
-    GLExtensionLoader::glGetProgramiv(program, GL_LINK_STATUS, &success);
+    glGetProgramiv(program, GL_LINK_STATUS, &success);
     if (!success) {
-        GLExtensionLoader::glDeleteProgram(program);
+        glDeleteProgram(program);
         return 0;
     }
     
@@ -128,7 +114,7 @@ int Shader::getUniformLocation(const std::string& name) const {
         return it->second;
     }
     
-    int location = GLExtensionLoader::glGetUniformLocation(programID, name.c_str());
+    int location = glGetUniformLocation(programID, name.c_str());
     uniformLocationCache[name] = location;
     return location;
 }
@@ -138,17 +124,17 @@ void Shader::checkCompileErrors(unsigned int shader, Type type) {
     char infoLog[1024];
     
     if (type != Type::PROGRAM) {
-        GLExtensionLoader::glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+        glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
         if (!success) {
-            GLExtensionLoader::glGetShaderInfoLog(shader, 1024, nullptr, infoLog);
+            glGetShaderInfoLog(shader, 1024, nullptr, infoLog);
             std::cerr << "ERROR::SHADER_COMPILATION_ERROR of type: " 
                       << (type == Type::VERTEX ? "VERTEX" : "FRAGMENT") << "\n" 
                       << infoLog << "\n -- --------------------------------------------------- -- " << std::endl;
         }
     } else {
-        GLExtensionLoader::glGetProgramiv(shader, GL_LINK_STATUS, &success);
+        glGetProgramiv(shader, GL_LINK_STATUS, &success);
         if (!success) {
-            GLExtensionLoader::glGetProgramInfoLog(shader, 1024, nullptr, infoLog);
+            glGetProgramInfoLog(shader, 1024, nullptr, infoLog);
             std::cerr << "ERROR::PROGRAM_LINKING_ERROR\n" 
                       << infoLog << "\n -- --------------------------------------------------- -- " << std::endl;
         }

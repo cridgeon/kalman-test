@@ -5,14 +5,9 @@
 #include <string>
 #include <functional>
 
-#include "imgui.h"
-#include "imgui_impl_glfw.h"
-#include "imgui_impl_opengl3.h"
+#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
-#include <GL/gl.h>
-
-#include "gl_extensions.hpp"
-#include "postprocessor.hpp"
+#include <glad/gl.h>
 #include "circle_renderer.hpp"
 
 class RenderingSystem {
@@ -33,31 +28,20 @@ public:
     // End frame and swap buffers
     void endFrame();
     
-    // Get ImGui draw list for drawing primitives
-    ImDrawList* getDrawList();
-    
-    // Create canvas window for drawing
-    void beginCanvas();
-    void endCanvas();
-    
-    // Get ImGui IO for input handling
-    ImGuiIO& getIO();
-    
     // Set background color
-    void setClearColor(const ImVec4& color);
+    void setClearColor(const unsigned char col[4]);
     
     // Get window dimensions
     int getWindowWidth() const { return window_width_; }
     int getWindowHeight() const { return window_height_; }
     
-    // Post-processing effects
-    PostProcessor& getPostProcessor() { return post_processor_; }
-    
-    // Circle rendering
-    CircleRenderer& getCircleRenderer() { return circle_renderer_; }
-    
     // Cleanup
     void shutdown();
+
+    GLFWwindow* getWindow() const { return window_; }
+    const char* getGLSLVersion() const { return glsl_version_; }
+
+    CircleRenderer& getCircleRenderer() { return circle_renderer_; }
 
 private:
     // GLFW callback
@@ -65,9 +49,6 @@ private:
     
     // Setup functions
     bool setupGLFW();
-    bool setupImGui();
-    bool setupPostProcessing();
-    void setupShaderEffects();
     
 private:
     int window_width_;
@@ -75,9 +56,8 @@ private:
     std::string window_title_;
     
     GLFWwindow* window_;
-    PostProcessor post_processor_;
     CircleRenderer circle_renderer_;
-    ImVec4 clear_color_;
+    unsigned char clear_color_[4];
     const char* glsl_version_;
     
     bool initialized_;

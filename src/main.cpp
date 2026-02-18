@@ -7,11 +7,13 @@
 #include <chrono>
 
 #include "kalman.hpp"
-#include "imgui.h"
 #include <random>
 #include "pid-controller/pid.hpp"
 #include "test_track.hpp"
 #include "rendering_system.hpp"
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_opengl3.h"
 
 using namespace std::chrono;
 #define GET_SYS_MILLIS() duration_cast<milliseconds>(system_clock::now().time_since_epoch())
@@ -59,6 +61,30 @@ std::mutex error_mutex;
 
 
 std::queue<std::pair<milliseconds, std::pair<float, float>>> position_queue;
+
+static bool setupImGui(GLFWwindow* window, const char* glsl_version) {
+     // Setup Dear ImGui context
+    // Setup Dear ImGui context
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
+
+    // Setup Dear ImGui style
+    ImGui::StyleColorsDark();
+
+    // Setup Platform/Renderer backends
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init(glsl_version);
+    
+    return true;
+}
+
+static void cleanupImGui() {
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+}
 
 // Thread function to update circle position
 void update_circle_position() {
@@ -187,6 +213,10 @@ int main() {
         std::cerr << "Failed to initialize rendering system" << std::endl;
         return 1;
     }
+    if (!setupImGui(renderer.getWindow(), renderer.getGLSLVersion())) {
+        std::cerr << "Failed to setup ImGui" << std::endl;
+        return false;
+    }
 
     // Our state
     bool show_demo_window = false;
@@ -260,6 +290,10 @@ int main() {
     while (renderer.shouldContinue()) {
         // Begin frame
         renderer.beginFrame();
+        // Start the Dear ImGui frame
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
 
         // Real circle position is now updated by the test track in update_circle_position thread
         // No longer using mouse position
@@ -302,7 +336,7 @@ int main() {
 
         // Show controls window
         if (show_controls) {
-            ImGuiIO& io = renderer.getIO();
+            ImGuiIO& io = ImGui::GetIO();
             ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
             ImGui::SetNextWindowSize(ImVec2(350, 0), ImGuiCond_FirstUseEver);
             ImGui::Begin("Controls", &show_controls);
@@ -428,33 +462,39 @@ int main() {
             ImGui::ShowDemoWindow(&show_demo_window);
 
         // Show shader effects window
-        {
-            ImGui::SetNextWindowPos(ImVec2(470, 150), ImGuiCond_FirstUseEver);
-            ImGui::SetNextWindowSize(ImVec2(300, 200), ImGuiCond_FirstUseEver);
-            ImGui::Begin("Post-Processing Effects");
+        // {
+        //     ImGui::SetNextWindowPos(ImVec2(470, 150), ImGuiCond_FirstUseEver);
+        //     ImGui::SetNextWindowSize(ImVec2(300, 200), ImGuiCond_FirstUseEver);
+        //     ImGui::Begin("Post-Processing Effects");
             
-            ImGui::Text("Available Shader Effects:");
-            ImGui::Separator();
+        //     ImGui::Text("Available Shader Effects:");
+        //     ImGui::Separator();
             
-            PostProcessor& postProcessor = renderer.getPostProcessor();
-            std::vector<std::string> effects = postProcessor.getEffectNames();
-            for (const std::string& effect : effects) {
-                bool enabled = postProcessor.isEffectEnabled(effect);
-                if (ImGui::Checkbox(effect.c_str(), &enabled)) {
-                    postProcessor.setEffectEnabled(effect, enabled);
-                }
-            }
+        //     PostProcessor& postProcessor = renderer.getPostProcessor();
+        //     std::vector<std::string> effects = postProcessor.getEffectNames();
+        //     for (const std::string& effect : effects) {
+        //         bool enabled = postProcessor.isEffectEnabled(effect);
+        //         if (ImGui::Checkbox(effect.c_str(), &enabled)) {
+        //             postProcessor.setEffectEnabled(effect, enabled);
+        //         }
+        //     }
             
-            ImGui::End();
-        }
-
+        //     ImGui::End();
+        // }
         // End frame
         renderer.endFrame();
+        // Rendering - render ImGui to the framebuffer first
+        ImGui::Render();
+        // Then render ImGui on top
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        glfwSwapBuffers(renderer.getWindow());
+
     }
 
     // Signal the update thread to stop and wait for it
     g_running = false;
     update_thread.join();
+    cleanupImGui();
 
     // Cleanup is handled automatically by RenderingSystem destructor
     return 0;

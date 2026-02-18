@@ -44,8 +44,8 @@ bool Framebuffer::create(int w, int h) {
     height = h;
 
     // Generate framebuffer
-    GLExtensionLoader::glGenFramebuffers(1, &framebufferID);
-    GLExtensionLoader::glBindFramebuffer(GL_FRAMEBUFFER, framebufferID);
+    glGenFramebuffers(1, &framebufferID);
+    glBindFramebuffer(GL_FRAMEBUFFER, framebufferID);
 
     // Create color texture
     glGenTextures(1, &colorTexture);
@@ -53,35 +53,35 @@ bool Framebuffer::create(int w, int h) {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    GLExtensionLoader::glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colorTexture, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colorTexture, 0);
 
     // Create depth renderbuffer
-    GLExtensionLoader::glGenRenderbuffers(1, &depthRenderbuffer);
-    GLExtensionLoader::glBindRenderbuffer(GL_RENDERBUFFER, depthRenderbuffer);
-    GLExtensionLoader::glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, width, height);
-    GLExtensionLoader::glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthRenderbuffer);
+    glGenRenderbuffers(1, &depthRenderbuffer);
+    glBindRenderbuffer(GL_RENDERBUFFER, depthRenderbuffer);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, width, height);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthRenderbuffer);
 
     // Check if framebuffer is complete
-    if (GLExtensionLoader::glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
         std::cerr << "ERROR::FRAMEBUFFER:: Framebuffer not complete!" << std::endl;
         cleanup();
-        GLExtensionLoader::glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
         return false;
     }
 
-    GLExtensionLoader::glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
     return true;
 }
 
 void Framebuffer::bind() const {
     if (framebufferID != 0) {
-        GLExtensionLoader::glBindFramebuffer(GL_FRAMEBUFFER, framebufferID);
+        glBindFramebuffer(GL_FRAMEBUFFER, framebufferID);
         glViewport(0, 0, width, height);
     }
 }
 
 void Framebuffer::unbind() const {
-    GLExtensionLoader::glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 bool Framebuffer::resize(int newWidth, int newHeight) {
@@ -93,7 +93,7 @@ bool Framebuffer::resize(int newWidth, int newHeight) {
 
 void Framebuffer::cleanup() {
     if (depthRenderbuffer != 0) {
-        GLExtensionLoader::glDeleteRenderbuffers(1, &depthRenderbuffer);
+        glDeleteRenderbuffers(1, &depthRenderbuffer);
         depthRenderbuffer = 0;
     }
     
@@ -103,7 +103,7 @@ void Framebuffer::cleanup() {
     }
     
     if (framebufferID != 0) {
-        GLExtensionLoader::glDeleteFramebuffers(1, &framebufferID);
+        glDeleteFramebuffers(1, &framebufferID);
         framebufferID = 0;
     }
 }

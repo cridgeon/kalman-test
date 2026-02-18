@@ -1,8 +1,7 @@
 #pragma once
 
 #include <vector>
-#include <GL/gl.h>
-#include "gl_extensions.hpp"
+#include <glad/gl.h>
 #include "shader.hpp"
 
 struct CircleData {

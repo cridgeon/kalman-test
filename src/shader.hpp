@@ -3,7 +3,7 @@
 #include <string>
 #include <unordered_map>
 #include <iostream>
-#include "gl_extensions.hpp"
+#include <glad/gl.h>
 
 class Shader {
 public:
@@ -33,19 +33,15 @@ public:
     // Use the shader program
     void use() const;
     
-    // Utility uniform functions
-    void setFloat(const std::string& name, float value) const;
-    void setInt(const std::string& name, int value) const;
-    void setVec2(const std::string& name, float x, float y) const;
-    void setVec3(const std::string& name, float x, float y, float z) const;
-    void setVec4(const std::string& name, float x, float y, float z, float w) const;
-    void setMat4(const std::string& name, const float* value) const;
+    int getUniformLocation(const std::string& name) const;
 
     // Get program ID  
     unsigned int getID() const { return programID; }
 
     // Check if shader is valid
     bool isValid() const { return programID != 0; }
+
+    void render();
 
 private:
     unsigned int programID;
@@ -54,7 +50,6 @@ private:
     // Helper functions
     unsigned int compileShader(const std::string& source, unsigned int type);
     unsigned int createProgram(unsigned int vertexShader, unsigned int fragmentShader);
-    int getUniformLocation(const std::string& name) const;
     void checkCompileErrors(unsigned int shader, Type type);
     std::string loadFile(const std::string& path);
 };
