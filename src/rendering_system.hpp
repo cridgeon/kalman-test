@@ -13,6 +13,7 @@
 
 #include "gl_extensions.hpp"
 #include "postprocessor.hpp"
+#include "circle_renderer.hpp"
 
 class RenderingSystem {
 public:
@@ -52,6 +53,9 @@ public:
     // Post-processing effects
     PostProcessor& getPostProcessor() { return post_processor_; }
     
+    // Circle rendering
+    CircleRenderer& getCircleRenderer() { return circle_renderer_; }
+    
     // Cleanup
     void shutdown();
 
@@ -72,6 +76,7 @@ private:
     
     GLFWwindow* window_;
     PostProcessor post_processor_;
+    CircleRenderer circle_renderer_;
     ImVec4 clear_color_;
     const char* glsl_version_;
     

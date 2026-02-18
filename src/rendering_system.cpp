@@ -31,6 +31,11 @@ bool RenderingSystem::initialize() {
         return false;
     }
     
+    if (!circle_renderer_.initialize(window_width_, window_height_)) {
+        std::cerr << "Failed to initialize circle renderer" << std::endl;
+        return false;
+    }
+    
     setupShaderEffects();
     
     initialized_ = true;
@@ -202,6 +207,9 @@ void RenderingSystem::beginFrame() {
     glfwGetFramebufferSize(window_, &display_w, &display_h);
     if (display_w != post_processor_.getWidth() || display_h != post_processor_.getHeight()) {
         post_processor_.resize(display_w, display_h);
+        circle_renderer_.resize(display_w, display_h);
+        window_width_ = display_w;
+        window_height_ = display_h;
     }
 
     // Begin rendering to framebuffer
@@ -216,13 +224,18 @@ void RenderingSystem::beginFrame() {
 void RenderingSystem::endFrame() {
     if (!initialized_) return;
     
-    // Rendering - render ImGui to the framebuffer first
-    ImGui::Render();
     
     // Clear the framebuffer and render ImGui to it
     glClearColor(clear_color_.x * clear_color_.w, clear_color_.y * clear_color_.w, 
-                 clear_color_.z * clear_color_.w, clear_color_.w);
+        clear_color_.z * clear_color_.w, clear_color_.w);
     glClear(GL_COLOR_BUFFER_BIT);
+        
+    // Render circles first (before ImGui)
+    circle_renderer_.render();
+    
+    // Rendering - render ImGui to the framebuffer first
+    ImGui::Render();
+    // Then render ImGui on top
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
     // Apply post-processing effects and render to screen

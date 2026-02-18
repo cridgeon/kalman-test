@@ -191,7 +191,7 @@ int main() {
     // Our state
     bool show_demo_window = false;
     bool show_controls = true;
-    ImVec4 real_color = ImVec4(0.2f, 0.8f, 0.2f, 1.0f);
+    ImVec4 real_color = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
     ImVec4 measured_color = ImVec4(0.8f, 0.2f, 0.2f, 1.0f);
     ImVec4 reported_color = ImVec4(0.8f, 0.8f, 0.2f, 1.0f);
     ImVec4 estimated_color = ImVec4(0.2f, 0.2f, 0.8f, 1.0f);
@@ -285,22 +285,20 @@ int main() {
         g_state_mutex.unlock();
 
         // Create a fullscreen ImGui window for drawing
-        renderer.beginCanvas();
+        // renderer.beginCanvas();
         
-        // Draw the circle
-        ImDrawList* draw_list = renderer.getDrawList();
-        ImU32 col = ImGui::GetColorU32(real_color);
-        draw_list->AddCircle(ImVec2((real_x + 1.0)/2.0 * WINDOW_WIDTH, (real_y + 1.0)/2.0 * WINDOW_HEIGHT), real_r, col, 32);
-        col = ImGui::GetColorU32(measured_color);
-        draw_list->AddCircle(ImVec2((measured_x + 1.0)/2.0 * WINDOW_WIDTH, (measured_y + 1.0)/2.0 * WINDOW_HEIGHT), measured_r, col, 32);
-        col = ImGui::GetColorU32(reported_color);
-        draw_list->AddCircle(ImVec2((g_reported_state.x + 1.0)/2.0 * WINDOW_WIDTH, (g_reported_state.y + 1.0)/2.0 * WINDOW_HEIGHT), g_reported_state.radius, col, 32);
-        col = ImGui::GetColorU32(estimated_color);
-        draw_list->AddCircle(ImVec2((estimated_x + 1.0)/2.0 * WINDOW_WIDTH, (estimated_y + 1.0)/2.0 * WINDOW_HEIGHT), estimated_r, col, 32);
-        col = ImGui::GetColorU32(smoothed_color);
-        draw_list->AddCircle(ImVec2((smoothed_x + 1.0)/2.0 * WINDOW_WIDTH, (smoothed_y + 1.0)/2.0 * WINDOW_HEIGHT), smoothed_r, col, 32);
+        // Clear previous circles and add new ones to the circle renderer
+        CircleRenderer& circleRenderer = renderer.getCircleRenderer();
+        circleRenderer.clearCircles();
         
-        renderer.endCanvas();
+        // Convert positions from current coordinate system to normalized coordinates [-1, 1]
+        // Current system: positions are in [-1, 1] range already
+        circleRenderer.addCircle(real_x, real_y, real_r, real_color.x, real_color.y, real_color.z, real_color.w);
+        circleRenderer.addCircle(measured_x, measured_y, measured_r, measured_color.x, measured_color.y, measured_color.z, measured_color.w);
+        circleRenderer.addCircle(g_reported_state.x, g_reported_state.y, g_reported_state.radius, reported_color.x, reported_color.y, reported_color.z, reported_color.w);
+        circleRenderer.addCircle(estimated_x, estimated_y, estimated_r, estimated_color.x, estimated_color.y, estimated_color.z, estimated_color.w);
+        circleRenderer.addCircle(smoothed_x, smoothed_y, smoothed_r, smoothed_color.x, smoothed_color.y, smoothed_color.z, smoothed_color.w);
+        // renderer.endCanvas();
 
         // Show controls window
         if (show_controls) {

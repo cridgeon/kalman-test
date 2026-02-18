@@ -57,6 +57,7 @@ add_subdirectory(pid-controller)
 add_executable(main
     src/main.cpp
     src/rendering_system.cpp
+    src/circle_renderer.cpp
     src/shader.cpp
     src/framebuffer.cpp
     src/postprocessor.cpp

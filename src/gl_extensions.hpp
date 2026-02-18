@@ -12,6 +12,7 @@ typedef void (*PFNGLGETSHADERINFOLOGPROC)(GLuint shader, GLsizei bufSize, GLsize
 typedef void (*PFNGLDELETESHADERPROC)(GLuint shader);
 typedef GLuint (*PFNGLCREATEPROGRAMPROC)(void);
 typedef void (*PFNGLATTACHSHADERPROC)(GLuint program, GLuint shader);
+typedef void (*PFNGLBINDATTRIBLOCATIONPROC)(GLuint program, GLuint index, const GLchar *name);
 typedef void (*PFNGLLINKPROGRAMPROC)(GLuint program);
 typedef void (*PFNGLGETPROGRAMIVPROC)(GLuint program, GLenum pname, GLint *params);
 typedef void (*PFNGLGETPROGRAMINFOLOGPROC)(GLuint program, GLsizei bufSize, GLsizei *length, GLchar *infoLog);
@@ -19,6 +20,7 @@ typedef void (*PFNGLDELETEPROGRAMPROC)(GLuint program);
 typedef void (*PFNGLUSEPROGRAMPROC)(GLuint program);
 typedef GLint (*PFNGLGETUNIFORMLOCATIONPROC)(GLuint program, const GLchar *name);
 typedef void (*PFNGLUNIFORM1FPROC)(GLint location, GLfloat v0);
+typedef void (*PFNGLUNIFORM1FVPROC)(GLint location, GLsizei count, const GLfloat *value);
 typedef void (*PFNGLUNIFORM1IPROC)(GLint location, GLint v0);
 typedef void (*PFNGLUNIFORM2FPROC)(GLint location, GLfloat v0, GLfloat v1);
 typedef void (*PFNGLUNIFORM3FPROC)(GLint location, GLfloat v0, GLfloat v1, GLfloat v2);
@@ -103,6 +105,7 @@ public:
     static PFNGLDELETESHADERPROC glDeleteShader;
     static PFNGLCREATEPROGRAMPROC glCreateProgram;
     static PFNGLATTACHSHADERPROC glAttachShader;
+    static PFNGLBINDATTRIBLOCATIONPROC glBindAttribLocation;
     static PFNGLLINKPROGRAMPROC glLinkProgram;
     static PFNGLGETPROGRAMIVPROC glGetProgramiv;
     static PFNGLGETPROGRAMINFOLOGPROC glGetProgramInfoLog;
@@ -110,6 +113,7 @@ public:
     static PFNGLUSEPROGRAMPROC glUseProgram;
     static PFNGLGETUNIFORMLOCATIONPROC glGetUniformLocation;
     static PFNGLUNIFORM1FPROC glUniform1f;
+    static PFNGLUNIFORM1FVPROC glUniform1fv;
     static PFNGLUNIFORM1IPROC glUniform1i;
     static PFNGLUNIFORM2FPROC glUniform2f;
     static PFNGLUNIFORM3FPROC glUniform3f;
