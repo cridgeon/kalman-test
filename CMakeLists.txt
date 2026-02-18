@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.10)
 project(kalman-test)
 
 # Set C++ standard
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Include Eigen header-only library
@@ -56,6 +56,10 @@ add_subdirectory(pid-controller)
 # Add main executable
 add_executable(main
     src/main.cpp
+    src/shader.cpp
+    src/framebuffer.cpp
+    src/postprocessor.cpp
+    src/gl_extensions.cpp
     pid-controller/pid.cpp
 )
 

@@ -11,9 +11,11 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 #include <GLFW/glfw3.h>
+#include <GL/gl.h>
 #include <random>
 #include "pid-controller/pid.hpp"
 #include "test_track.hpp"
+#include "postprocessor.hpp"
 
 using namespace std::chrono;
 #define GET_SYS_MILLIS() duration_cast<milliseconds>(system_clock::now().time_since_epoch())
@@ -209,6 +211,13 @@ int main() {
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1); // Enable vsync
 
+    // Load OpenGL extensions
+    if (!GLExtensionLoader::loadExtensions()) {
+        std::cerr << "Failed to load OpenGL extensions" << std::endl;
+        glfwTerminate();
+        return 1;
+    }
+
     // Setup Dear ImGui context
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -221,6 +230,95 @@ int main() {
     // Setup Platform/Renderer backends
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glsl_version);
+
+    // Initialize post-processing system
+    PostProcessor postProcessor;
+    if (!postProcessor.initialize(WINDOW_WIDTH, WINDOW_HEIGHT)) {
+        std::cerr << "Failed to initialize post-processor" << std::endl;
+        return 1;
+    }
+
+    // Load post-processing shaders
+    postProcessor.addEffect("passthrough", R"(
+        #version 130
+        in vec2 TexCoords;
+        out vec4 color;
+        uniform sampler2D screenTexture;
+        void main() {
+            color = texture2D(screenTexture, TexCoords);
+        }
+    )");
+
+    // Enable passthrough by default
+    postProcessor.setEffectEnabled("passthrough", true);
+
+    postProcessor.addEffect("grayscale", R"(
+        #version 130
+        in vec2 TexCoords;
+        out vec4 color;
+        uniform sampler2D screenTexture;
+        void main() {
+            vec3 texColor = texture2D(screenTexture, TexCoords).rgb;
+            float gray = dot(texColor, vec3(0.299, 0.587, 0.114));
+            color = vec4(vec3(gray), 1.0);
+        }
+    )");
+
+    postProcessor.addEffect("invert", R"(
+        #version 130
+        in vec2 TexCoords;
+        out vec4 color;
+        uniform sampler2D screenTexture;
+        void main() {
+            vec3 texColor = texture2D(screenTexture, TexCoords).rgb;
+            color = vec4(1.0 - texColor, 1.0);
+        }
+    )");
+
+    postProcessor.addEffect("blur", R"(
+        #version 130
+        in vec2 TexCoords;
+        out vec4 color;
+        uniform sampler2D screenTexture;
+        uniform vec2 resolution;
+        void main() {
+            vec2 texelSize = 1.0 / resolution;
+            vec3 result = vec3(0.0);
+            for(int x = -1; x <= 1; ++x) {
+                for(int y = -1; y <= 1; ++y) {
+                    vec2 offset = vec2(float(x), float(y)) * texelSize;
+                    result += texture2D(screenTexture, TexCoords + offset).rgb;
+                }
+            }
+            result /= 9.0;
+            color = vec4(result, 1.0);
+        }
+    )");
+
+    postProcessor.addEffect("edge_detect", R"(
+        #version 130
+        in vec2 TexCoords;
+        out vec4 color;
+        uniform sampler2D screenTexture;
+        uniform vec2 resolution;
+        void main() {
+            vec2 texelSize = 1.0 / resolution;
+            vec3 top = texture2D(screenTexture, TexCoords + vec2(0.0, texelSize.y)).rgb;
+            vec3 bottom = texture2D(screenTexture, TexCoords + vec2(0.0, -texelSize.y)).rgb;
+            vec3 left = texture2D(screenTexture, TexCoords + vec2(-texelSize.x, 0.0)).rgb;
+            vec3 right = texture2D(screenTexture, TexCoords + vec2(texelSize.x, 0.0)).rgb;
+            vec3 topLeft = texture2D(screenTexture, TexCoords + vec2(-texelSize.x, texelSize.y)).rgb;
+            vec3 topRight = texture2D(screenTexture, TexCoords + vec2(texelSize.x, texelSize.y)).rgb;
+            vec3 bottomLeft = texture2D(screenTexture, TexCoords + vec2(-texelSize.x, -texelSize.y)).rgb;
+            vec3 bottomRight = texture2D(screenTexture, TexCoords + vec2(texelSize.x, -texelSize.y)).rgb;
+            
+            vec3 sx = (topRight + 2.0 * right + bottomRight) - (topLeft + 2.0 * left + bottomLeft);
+            vec3 sy = (topLeft + 2.0 * top + topRight) - (bottomLeft + 2.0 * bottom + bottomRight);
+            vec3 sobel = sqrt(sx * sx + sy * sy);
+            
+            color = vec4(sobel, 1.0);
+        }
+    )");
 
     // Our state
     bool show_demo_window = false;
@@ -295,6 +393,16 @@ int main() {
     while (!glfwWindowShouldClose(window)) {
         // Poll and handle events
         glfwPollEvents();
+
+        // Check for window resize
+        int display_w, display_h;
+        glfwGetFramebufferSize(window, &display_w, &display_h);
+        if (display_w != postProcessor.getWidth() || display_h != postProcessor.getHeight()) {
+            postProcessor.resize(display_w, display_h);
+        }
+
+        // Begin rendering to framebuffer
+        postProcessor.beginRender();
 
         // Real circle position is now updated by the test track in update_circle_position thread
         // No longer using mouse position
@@ -475,15 +583,37 @@ int main() {
         if (show_demo_window)
             ImGui::ShowDemoWindow(&show_demo_window);
 
-        // Rendering
+        // Show shader effects window
+        {
+            ImGui::SetNextWindowPos(ImVec2(470, 150), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowSize(ImVec2(300, 200), ImGuiCond_FirstUseEver);
+            ImGui::Begin("Post-Processing Effects");
+            
+            ImGui::Text("Available Shader Effects:");
+            ImGui::Separator();
+            
+            std::vector<std::string> effects = postProcessor.getEffectNames();
+            for (const std::string& effect : effects) {
+                bool enabled = postProcessor.isEffectEnabled(effect);
+                if (ImGui::Checkbox(effect.c_str(), &enabled)) {
+                    postProcessor.setEffectEnabled(effect, enabled);
+                }
+            }
+            
+            ImGui::End();
+        }
+
+        // Rendering - render ImGui to the framebuffer first
         ImGui::Render();
-        int display_w, display_h;
-        glfwGetFramebufferSize(window, &display_w, &display_h);
-        glViewport(0, 0, display_w, display_h);
+        
+        // Clear the framebuffer and render ImGui to it
         glClearColor(clear_color.x * clear_color.w, clear_color.y * clear_color.w, 
                      clear_color.z * clear_color.w, clear_color.w);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        // Apply post-processing effects and render to screen
+        postProcessor.endRender();
 
         glfwSwapBuffers(window);
     }
